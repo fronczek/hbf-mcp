@@ -15,9 +15,13 @@ The goal is deliberately simple:
 ```text
 ChatGPT
    |
-   | MCP / authenticated private tunnel
+   | HTTPS
    v
-hbf-mcp VM
+external reverse proxy (e.g. Caddy)
+   |
+   | LAN / private network
+   v
+hbf-mcp VM:8765
    |
    +-- shell
    +-- filesystem
@@ -25,13 +29,19 @@ hbf-mcp VM
    +-- later: SSH / Proxmox / InfluxDB / PBS / ...
 ```
 
-The MCP endpoint binds to localhost only by default:
+By default the MCP server listens on all interfaces:
 
 ```text
-http://127.0.0.1:8765/mcp
+0.0.0.0:8765
 ```
 
-Do **not** expose port 8765 directly to the Internet. The `shell` tool is intentionally unrestricted.
+The MCP endpoint is:
+
+```text
+http://<vm-address>:8765/mcp
+```
+
+Do **not** expose port 8765 directly to the Internet. The `shell` tool is intentionally unrestricted. Put an HTTPS reverse proxy in front of it and restrict direct access to port 8765 to trusted hosts/networks.
 
 ## Requirements
 
@@ -101,6 +111,13 @@ Environment file:
 
 ```text
 /etc/hbf-mcp.env
+```
+
+Default network settings:
+
+```bash
+HBF_MCP_HOST=0.0.0.0
+HBF_MCP_PORT=8765
 ```
 
 After editing it:
