@@ -57,9 +57,12 @@ fi
 chown -R "${SERVICE_USER}:${SERVICE_USER}" "${INSTALL_DIR}"
 
 if [[ ! -f /etc/hbf-mcp.env ]]; then
-  install -o root -g root -m 0644 \
+  install -o root -g root -m 0600 \
     "${SOURCE_DIR}/hbf-mcp.env.example" \
     /etc/hbf-mcp.env
+else
+  chown root:root /etc/hbf-mcp.env
+  chmod 0600 /etc/hbf-mcp.env
 fi
 
 install -o root -g root -m 0644 \
