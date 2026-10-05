@@ -11,7 +11,7 @@ from mcp.server import MCPServer
 
 
 NAME = os.getenv("HBF_MCP_NAME", "HBF MCP - Artur")
-HOST = os.getenv("HBF_MCP_HOST", "127.0.0.1")
+HOST = os.getenv("HBF_MCP_HOST", "0.0.0.0")
 PORT = int(os.getenv("HBF_MCP_PORT", "8765"))
 
 DEFAULT_CWD = Path(
