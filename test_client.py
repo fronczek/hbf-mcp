@@ -16,15 +16,15 @@ async def main() -> None:
         print(f"Protocol: {client.protocol_version}")
         print()
 
-        tools = await client.list_tools()
+        result = await client.list_tools()
         print("Tools:")
-        for tool in tools:
+        for tool in result.tools:
             print(f"  - {tool.name}")
 
         print()
-        result = await client.call_tool("info", {})
+        info = await client.call_tool("info", {})
         print("info:")
-        print(result.structured_content)
+        print(info.structured_content)
 
 
 if __name__ == "__main__":
