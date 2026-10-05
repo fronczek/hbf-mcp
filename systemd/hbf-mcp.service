@@ -1,0 +1,20 @@
+[Unit]
+Description=HBF MCP bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gptagent
+Group=gptagent
+WorkingDirectory=/opt/hbf-mcp
+EnvironmentFile=-/etc/hbf-mcp.env
+ExecStart=/opt/hbf-mcp/.venv/bin/python /opt/hbf-mcp/server.py
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=15
+KillMode=mixed
+NoNewPrivileges=no
+
+[Install]
+WantedBy=multi-user.target
