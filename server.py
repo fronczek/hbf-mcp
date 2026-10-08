@@ -172,7 +172,7 @@ _SECRET_NAME_RE = re.compile(
     r"|^\.pgpass$"
     r"|^\.my\.cnf$"
     r"|^\.git-credentials$"
-    r"|^id_(rsa|dsa|ecdsa|ed25519)$"
+    r"|^id_(rsa|dsa|ecdsa|ed25519)(_[a-z0-9._-]+)?$"
     r"|\.(pem|key|p12|pfx|kdbx|jks|keystore)$"
     r"|(secret|credential|password|passwd|token|api[_-]?key)"
     r")",
@@ -205,11 +205,19 @@ def canonical(path: Path) -> Path:
 
 
 def is_secret_path(path: Path) -> bool:
-    """Heuristically decide whether a path holds credentials."""
+    """Heuristically decide whether a path holds credentials.
+
+    Every path component is checked, not just the file name, so a credential
+    stored as ``~/.ssh/id_ed25519_github`` or
+    ``~/credentials/influxdb.txt`` is still recognised.
+    """
     resolved = canonical(path)
-    if resolved.name and _SECRET_NAME_RE.search(resolved.name):
-        return True
-    return any(part.lower() in _SECRET_DIR_NAMES for part in resolved.parts)
+    for part in resolved.parts:
+        if part.lower() in _SECRET_DIR_NAMES:
+            return True
+        if _SECRET_NAME_RE.search(part):
+            return True
+    return False
 
 
 def _within(path: Path, roots: tuple[Path, ...]) -> bool:

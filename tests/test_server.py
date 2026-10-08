@@ -363,6 +363,24 @@ def test_read_file_refuses_files_under_dot_ssh(sandbox):
         server.read_file(str(key))
 
 
+def test_read_file_refuses_files_in_a_credentials_directory(sandbox):
+    creds = sandbox.allowed / "credentials"
+    creds.mkdir()
+    token = creds / "influxdb.txt"
+    token.write_text("TOKEN", encoding="utf-8")
+    with pytest.raises(server.SecretAccessError):
+        server.read_file(str(token))
+
+
+def test_read_file_refuses_an_ssh_key_with_a_host_suffix(sandbox):
+    key = sandbox.allowed / "id_ed25519_github"
+    key.write_text("PRIVATE", encoding="utf-8")
+    # Host-suffixed key names are caught by the component check.
+    assert server.is_secret_path(key) is True
+    with pytest.raises(server.SecretAccessError):
+        server.read_file(str(key))
+
+
 def test_read_file_truncates_to_the_output_limit(sandbox, monkeypatch):
     path = sandbox.allowed / "big.txt"
     path.write_text("a" * 5000, encoding="utf-8")

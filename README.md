@@ -126,7 +126,8 @@ Concretely:
   `HBF_MCP_WRITE_ROOTS`. Every path is canonicalised with `os.path.realpath`
   *before* the allowlist check, so `..` and symlinks cannot escape a root.
 - **Credentials are separate.** `read_file` refuses secret-looking names
-  (`.env`, `id_ed25519`, `*.pem`, `*token*`, anything under `.ssh/`, …).
+  (`.env`, `id_ed25519`, `*.pem`, `*token*`, anything under `.ssh/`, and any
+  path component such as `credentials/` or `secrets/`).
   `read_secret_file` only accepts paths in `HBF_MCP_SECRET_READ_ALLOWLIST`,
   which is empty by default.
 - **Output and time are bounded.** Shell and Git calls have hard timeouts;
