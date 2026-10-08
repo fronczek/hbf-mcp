@@ -14,7 +14,9 @@ Restart=on-failure
 RestartSec=2
 TimeoutStopSec=15
 KillMode=mixed
-NoNewPrivileges=no
+# The service account is unprivileged and the server never escalates.
+# NoNewPrivileges stays at its secure default (yes).
+NoNewPrivileges=yes
 
 [Install]
 WantedBy=multi-user.target

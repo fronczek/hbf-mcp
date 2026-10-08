@@ -18,7 +18,6 @@ apt-get install -y \
   git \
   curl \
   jq \
-  sudo \
   openssh-client \
   ca-certificates
 
@@ -26,12 +25,12 @@ if ! id "${SERVICE_USER}" >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash "${SERVICE_USER}"
 fi
 
-cat >/etc/sudoers.d/gptagent <<'EOF'
-gptagent ALL=(ALL) NOPASSWD:ALL
-EOF
-
-chmod 0440 /etc/sudoers.d/gptagent
-visudo -cf /etc/sudoers.d/gptagent
+# The service account is deliberately unprivileged. This installer must never
+# grant it sudo, and it does not create or modify /etc/sudoers.d/gptagent.
+if [[ -e /etc/sudoers.d/gptagent ]]; then
+  echo "WARNING: /etc/sudoers.d/gptagent exists." >&2
+  echo "         The MCP service expects an unprivileged account; review and remove it." >&2
+fi
 
 install -d -o "${SERVICE_USER}" -g "${SERVICE_USER}" "${INSTALL_DIR}"
 
