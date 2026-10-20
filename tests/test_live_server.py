@@ -35,6 +35,35 @@ READ_ONLY_TOOLS = {
 MUTATING_TOOLS = {"shell", "write_file"}
 
 
+GITEA_READ_ONLY_TOOLS = {
+    "gitea_connection", "gitea_get_repository", "gitea_list_branches",
+    "gitea_get_branch", "gitea_read_path", "gitea_list_commits",
+    "gitea_get_commit", "gitea_compare_refs", "gitea_get_tree",
+    "gitea_search_code", "gitea_list_issues", "gitea_get_issue",
+    "gitea_list_pull_requests", "gitea_get_pull_request", "gitea_get_pull_diff",
+    "gitea_list_pull_files", "gitea_list_reviews", "gitea_list_comments",
+    "gitea_commit_status", "gitea_list_action_runs", "gitea_list_action_jobs",
+    "gitea_read_action_log", "gitea_operation_status",
+}
+GITEA_MUTATING_TOOLS = {
+    "gitea_add_comment", "gitea_create_issue", "gitea_create_pull_request",
+    "gitea_submit_review", "gitea_create_branch",
+}
+YOUTRACK_MUTATING_TOOLS = {"youtrack_add_comment", "youtrack_append_decision"}
+READ_ONLY_TOOLS |= GITEA_READ_ONLY_TOOLS | {"youtrack_issue_overview"}
+MUTATING_TOOLS |= GITEA_MUTATING_TOOLS | YOUTRACK_MUTATING_TOOLS
+
+GIT_READ_ONLY_TOOLS = {"git_workflow_status"}
+GIT_MUTATING_TOOLS = {"git_workflow_sync", "git_workflow_branch", "git_workflow_stage",
+                      "git_workflow_signed_commit", "git_workflow_push"}
+AGENT_READ_ONLY_TOOLS = {"deepseek_sessions"}
+AGENT_MUTATING_TOOLS = {"deepseek_flash_task", "ese_browser_gate"}
+READ_ONLY_TOOLS |= GIT_READ_ONLY_TOOLS | AGENT_READ_ONLY_TOOLS | {"mcp_health","mcp_api_health",
+                       "youtrack_search_issues","youtrack_issue_detail","youtrack_issue_comments",
+                       "gitea_ci_summary"}
+MUTATING_TOOLS |= GIT_MUTATING_TOOLS | AGENT_MUTATING_TOOLS | {"youtrack_apply_state"}
+
+
 def _free_port() -> int:
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
