@@ -788,6 +788,12 @@ from gitea_tools import register_tools as register_gitea_tools
 from youtrack_tools import register_tools as register_youtrack_tools
 register_gitea_tools(mcp)
 register_youtrack_tools(mcp)
+from git_workflow_tools import register_tools as register_git_workflow_tools
+from agent_tools import register_tools as register_agent_tools
+from diagnostics_tools import register_tools as register_diagnostics_tools
+register_git_workflow_tools(mcp)
+register_agent_tools(mcp)
+register_diagnostics_tools(mcp)
 
 if __name__ == "__main__":
     mcp.run(

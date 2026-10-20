@@ -110,7 +110,7 @@ class MCPRegistrationTests(unittest.TestCase):
         async def names():
             return [tool.name for tool in await s.list_tools()]
         tools=asyncio.run(names())
-        self.assertEqual(len(tools),28)
+        self.assertEqual(len(tools),29)
         self.assertIn("gitea_submit_review",tools)
         self.assertIn("gitea_get_pull_diff",tools)
         self.assertNotIn("gitea_commit_files",tools)

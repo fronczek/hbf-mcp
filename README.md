@@ -85,6 +85,15 @@ sudo -u gptagent /opt/hbf-mcp/.venv/bin/python /opt/hbf-mcp/test_client.py
 
 It should list the available tools and call `info`.
 
+## Typed REST and workflow tools (October 2026)
+
+The bridge also provides Git workflow, Gitea REST, YouTrack REST, DeepSeek
+Harness API, existing ESE browser test, and concise MCP diagnostics tools.
+Typed operations return bounded summaries; they supplement rather than remove
+the local `shell` tool. Work on other hosts via interactive SSH still requires
+prior owner permission. See [API and workflow tools](docs/gitea-youtrack-tools.md)
+for scope, signing, budget controls, availability and restart instructions.
+
 ## Tools
 
 | Tool | `readOnlyHint` | Purpose |

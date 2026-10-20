@@ -46,7 +46,7 @@ install -o "${SERVICE_USER}" -g "${SERVICE_USER}" -m 0644 \
   "${SOURCE_DIR}/requirements.txt" \
   "${INSTALL_DIR}/requirements.txt"
 
-for module in gitea_tools.py youtrack_tools.py; do
+for module in gitea_tools.py youtrack_tools.py git_workflow_tools.py agent_tools.py diagnostics_tools.py; do
   install -o "${SERVICE_USER}" -g "${SERVICE_USER}" -m 0644 "${SOURCE_DIR}/${module}" "${INSTALL_DIR}/${module}"
 done
 

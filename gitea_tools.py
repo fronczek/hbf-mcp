@@ -399,6 +399,31 @@ def register_tools(mcp: Any) -> None:
                     "head_sha","head_branch","html_url","created_at")} for x in data.get("workflow_runs",[])],"page":page}
 
     @mcp.tool(annotations=read)
+    def gitea_ci_summary(repo: str, branch: str = "", limit: int = 5) -> dict:
+        """One compact CI dashboard: recent runs and latest failed job names."""
+        if not 1 <= limit <= 15:
+            raise ValueError("Limit must be 1..15")
+        q=_page(1,limit)
+        if branch: q["branch"]=_ref(branch)
+        result=_api("GET",_repo(repo)+"/actions/runs",query=q)
+        runs=result.get("workflow_runs",[])
+        items=[{"id":x.get("id"),"title":(x.get("display_title") or "")[:100],
+                "status":x.get("status"),"conclusion":x.get("conclusion"),
+                "sha":(x.get("head_sha") or "")[:12]} for x in runs]
+        failures=[r for r in items if r.get("conclusion") in ("failure","timed_out")]
+        jobs=[]
+        if failures:
+            run_id=failures[0]["id"]
+            detail=_api("GET",_repo(repo)+f"/actions/runs/{_index(run_id)}/jobs",
+                        query=_page(1,50))
+            jobs=[{"id":j.get("id"),"name":j.get("name"),
+                   "conclusion":j.get("conclusion")}
+                  for j in detail.get("jobs",[])
+                  if j.get("conclusion") in ("failure","timed_out")][:8]
+        return {"repo":repo,"runs":items,"failed_jobs":jobs,
+                "has_more":result.get("total_count",len(items))>len(items)}
+
+    @mcp.tool(annotations=read)
     def gitea_list_action_jobs(repo: str, run_id:int, page:int=1,limit:int=30) -> dict:
         """Read Actions job status and step results."""
         return _api("GET",_repo(repo)+f"/actions/runs/{_index(run_id)}/jobs",query=_page(page,limit))

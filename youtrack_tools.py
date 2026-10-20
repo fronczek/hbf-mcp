@@ -96,6 +96,65 @@ def register_tools(mcp: Any) -> None:
     write = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
 
     @mcp.tool(annotations=read)
+    def youtrack_search_issues(query: str = "", limit: int = 15, skip: int = 0) -> dict:
+        """Find ESE issues with bounded summaries; optional YouTrack search terms."""
+        if not 1 <= limit <= 50 or not 0 <= skip <= 2000 or len(query) > 160:
+            raise ValueError("Invalid search pagination or query")
+        if any(ch in query for ch in "\r\n"):
+            raise ValueError("Search query must be a single line")
+        q = "project: ESE " + query.strip()
+        params = urllib.parse.urlencode({"query":q,"$top":limit,"$skip":skip,
+            "fields":"idReadable,summary,updated,resolved,customFields(name,value(name))"})
+        results = _call("GET", "/api/issues?" + params)
+        if not isinstance(results,list):
+            raise RuntimeError("Unexpected issue search response")
+        return {"issues":[{"id":r.get("idReadable"),"summary":(r.get("summary") or "")[:240],
+                  "updated":r.get("updated"),"resolved":bool(r.get("resolved"))} for r in results],
+                "limit":limit,"skip":skip,"has_more":len(results)==limit}
+
+    @mcp.tool(annotations=read)
+    def youtrack_issue_detail(issue_id: str, max_description: int = 5000) -> dict:
+        """Read a bounded ESE issue description plus current status and metadata."""
+        if not 0 <= max_description <= 12000:
+            raise ValueError("Description limit must be 0..12000")
+        obj=_call("GET",_issue(issue_id)+
+                "?fields=idReadable,summary,description,updated,customFields(name,value(name))")
+        body=obj.get("description") or ""
+        return {"id":obj.get("idReadable"),"summary":obj.get("summary"),
+                "updated":obj.get("updated"),"description":body[:max_description],
+                "description_truncated":len(body)>max_description,
+                "fields":{f.get("name"):(f.get("value") or {}).get("name")
+                 for f in obj.get("customFields",[]) if isinstance(f.get("value"),dict)}}
+
+    @mcp.tool(annotations=read)
+    def youtrack_issue_comments(issue_id: str, limit: int = 10) -> dict:
+        """Read recent ESE issue comments as short excerpts, without full comment dumps."""
+        if not 1 <= limit <= 30:
+            raise ValueError("Limit must be 1..30")
+        params=urllib.parse.urlencode({"$top":limit,"fields":"id,author(login),created,text"})
+        obj=_call("GET",_issue(issue_id)+"/comments?"+params)
+        if not isinstance(obj,list):
+            raise RuntimeError("Unexpected comments response")
+        return {"issue":issue_id,"comments":[{"id":x.get("id"),
+            "author":(x.get("author") or {}).get("login"),"created":x.get("created"),
+            "excerpt":(x.get("text") or "")[:1200]} for x in obj]}
+
+    @mcp.tool(annotations=write)
+    def youtrack_apply_state(issue_id: str, new_state: str) -> dict:
+        """Change ESE issue state via YouTrack command API (explicit state only)."""
+        allowed={"Open","In Progress","Fixed","Verified","Reopened","To Do"}
+        if new_state not in allowed:
+            raise ValueError("Unrecognised state; check project state values")
+        _confirm_gpt_account()
+        issue=_call("GET",_issue(issue_id)+"?fields=id,idReadable")
+        if not issue.get("id") or issue.get("idReadable")!=issue_id:
+            raise RuntimeError("Unexpected issue identity")
+        _call("POST","/api/commands",{"query":"State "+new_state,
+                                    "issues":[{"id":issue["id"]}]})
+        return {"issue":issue_id,"requested_state":new_state,
+                "result":"accepted by YouTrack; refresh issue to confirm"}
+
+    @mcp.tool(annotations=read)
     def youtrack_issue_overview(issue_id: str) -> dict:
         """Read an ESE issue summary, state, and section headings (not raw secret data)."""
         obj = _call(
