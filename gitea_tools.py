@@ -233,7 +233,7 @@ def _compact_pr(pr: dict) -> dict:
 def register_tools(mcp: Any) -> None:
     """Register typed tools on an existing MCPServer."""
     read = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True)
-    write = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=True)
+    write = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True)
 
     @mcp.tool(annotations=read)
     def gitea_connection() -> dict:

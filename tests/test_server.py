@@ -155,11 +155,12 @@ def test_read_only_hint_matches_the_required_table():
         assert tools[name].annotations.read_only_hint is False, name
 
 
-def test_mutating_tools_are_marked_destructive_with_truthful_idempotency():
+def test_mutating_tools_have_truthful_destructive_and_idempotency_hints():
     tools = list_tools()
     for name in MUTATING_TOOLS:
         annotations = tools[name].annotations
-        assert annotations.destructive_hint is True, name
+        nondestructive = GITEA_MUTATING_TOOLS | {"youtrack_add_comment", "youtrack_append_decision"}
+        assert annotations.destructive_hint is (name not in nondestructive), name
         assert annotations.idempotent_hint is (name in GITEA_MUTATING_TOOLS), name
 
 
