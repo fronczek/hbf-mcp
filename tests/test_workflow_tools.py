@@ -122,6 +122,14 @@ class DeepSeekToolsTests(unittest.TestCase):
             self.assertNotIn('classified',str(result))
             self.assertNotIn('tenant@example.test',str(result))
 
+    def test_flash_default_is_one_dollar_per_task(self):
+        fn=find('deepseek_flash_task',agent)
+        with patch.object(agent,'_run',return_value='session: 123\n---- assistant result ----\nOK') as runner:
+            out=fn('ESE-801','Review the synthetic queue safely')
+        self.assertEqual(out['session'],'123')
+        args=runner.call_args.args[0]
+        self.assertEqual(args[args.index('--max-usd')+1],'1.0')
+
     def test_browser_rejects_missing_dependencies(self):
         fn=find('ese_browser_gate',agent)
         with patch.object(agent,'BROWSER',Path('/tmp/ese-test-absent-192839')):

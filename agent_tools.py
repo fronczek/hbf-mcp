@@ -52,7 +52,7 @@ def register_tools(mcp:Any)->None:
                 'has_more':len(items)>limit}
 
     @mcp.tool(annotations=write)
-    def deepseek_flash_task(issue_id:str, task:str, max_usd:float=0.05,
+    def deepseek_flash_task(issue_id:str, task:str, max_usd:float=1.00,
                             timeout_seconds:int=180)->dict:
         """Delegate one ESE task via existing DSH Flash HTTPS API, with budget cap.
 
@@ -61,7 +61,7 @@ def register_tools(mcp:Any)->None:
         """
         if not ESE.fullmatch(issue_id): raise ValueError('Expected ESE issue ID')
         if not 15<=len(task)<=8000: raise ValueError('Task length must be 15..8000')
-        if not 0.001<=max_usd<=0.20: raise ValueError('Budget must be USD 0.001..0.20')
+        if not 0.001<=max_usd<=1.00: raise ValueError('Task budget must be USD 0.001..1.00')
         if not 30<=timeout_seconds<=600: raise ValueError('Timeout must be 30..600 s')
         prompt=(f'Work on {issue_id} only. Before editing, pull latest from configured remote. '
                 'Follow AGENTS.md and existing repository/project rules. '
