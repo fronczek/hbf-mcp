@@ -40,6 +40,25 @@ READ_ONLY_TOOLS = {
 MUTATING_TOOLS = {"shell", "write_file"}
 
 
+GITEA_READ_ONLY_TOOLS = {
+    "gitea_connection", "gitea_get_repository", "gitea_list_branches",
+    "gitea_get_branch", "gitea_read_path", "gitea_list_commits",
+    "gitea_get_commit", "gitea_compare_refs", "gitea_get_tree",
+    "gitea_search_code", "gitea_list_issues", "gitea_get_issue",
+    "gitea_list_pull_requests", "gitea_get_pull_request", "gitea_get_pull_diff",
+    "gitea_list_pull_files", "gitea_list_reviews", "gitea_list_comments",
+    "gitea_commit_status", "gitea_list_action_runs", "gitea_list_action_jobs",
+    "gitea_read_action_log", "gitea_operation_status",
+}
+GITEA_MUTATING_TOOLS = {
+    "gitea_add_comment", "gitea_create_issue", "gitea_create_pull_request",
+    "gitea_submit_review", "gitea_create_branch",
+}
+YOUTRACK_MUTATING_TOOLS = {"youtrack_add_comment", "youtrack_append_decision"}
+READ_ONLY_TOOLS |= GITEA_READ_ONLY_TOOLS | {"youtrack_issue_overview"}
+MUTATING_TOOLS |= GITEA_MUTATING_TOOLS | YOUTRACK_MUTATING_TOOLS
+
+
 def list_tools() -> dict[str, object]:
     return {tool.name: tool for tool in asyncio.run(server.mcp.list_tools())}
 
@@ -126,12 +145,12 @@ def test_read_only_hint_matches_the_required_table():
         assert tools[name].annotations.read_only_hint is False, name
 
 
-def test_mutating_tools_are_marked_destructive_not_idempotent():
+def test_mutating_tools_are_marked_destructive_with_truthful_idempotency():
     tools = list_tools()
     for name in MUTATING_TOOLS:
         annotations = tools[name].annotations
         assert annotations.destructive_hint is True, name
-        assert annotations.idempotent_hint is False, name
+        assert annotations.idempotent_hint is (name in GITEA_MUTATING_TOOLS), name
 
 
 def test_shell_is_not_annotated_as_read_only():
