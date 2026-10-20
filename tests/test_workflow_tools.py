@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -121,6 +122,23 @@ class DeepSeekToolsTests(unittest.TestCase):
             self.assertNotIn('very-private',str(result))
             self.assertNotIn('classified',str(result))
             self.assertNotIn('tenant@example.test',str(result))
+
+    def test_sessions_use_compact_helper(self):
+        fn=find('deepseek_sessions',agent)
+        data={'items':[{'sessionId':'active-1','running':True,'cwd':'/work','updatedAt':'now'}],
+              'total':236,'has_more':True}
+        with patch.object(agent,'_run',return_value=json.dumps(data)) as call:
+            out=fn(10)
+        self.assertEqual(call.call_args.args[0],
+                         [str(agent.HELPER),'sessions','--brief-limit','10'])
+        self.assertEqual(out['count_shown'],1)
+        self.assertTrue(out['has_more'])
+        self.assertEqual(out['sessions'][0]['session'],'active-1')
+
+    def test_sessions_reject_oversized_response(self):
+        fn=find('deepseek_sessions',agent)
+        with patch.object(agent,'_run',return_value=json.dumps({'items':[{},{}]})):
+            with self.assertRaisesRegex(RuntimeError,'bounded'):fn(1)
 
     def test_flash_default_is_one_dollar_per_task(self):
         fn=find('deepseek_flash_task',agent)

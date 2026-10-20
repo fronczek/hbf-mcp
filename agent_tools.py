@@ -56,14 +56,15 @@ def register_tools(mcp:Any)->None:
     def deepseek_sessions(limit:int=10)->dict:
         """List running DSH sessions using preconfigured HTTPS Harness API helper."""
         if not 1<=limit<=25: raise ValueError('Limit must be 1..25')
-        raw=_run([str(HELPER),'sessions','--json'])
+        raw=_run([str(HELPER),'sessions','--brief-limit',str(limit)])
         obj=json.loads(raw)
-        items=obj.get('items',obj) if isinstance(obj,dict) else obj
-        if not isinstance(items,list): raise RuntimeError('Unexpected session list')
+        items=obj.get('items') if isinstance(obj,dict) else None
+        if not isinstance(items,list) or len(items)>limit:
+            raise RuntimeError('Unexpected bounded session list')
         return {'sessions':[{'session':x.get('sessionId'),'running':x.get('running'),
                 'cwd':x.get('cwd'),'updated':x.get('updatedAt')}
-                for x in items[:limit]],'count_shown':min(limit,len(items)),
-                'has_more':len(items)>limit}
+                for x in items], 'count_shown':len(items),
+                'has_more':bool(obj.get('has_more'))}
 
     @mcp.tool(annotations=write)
     def deepseek_flash_task(issue_id:str, task:str, max_usd:float=1.00,
