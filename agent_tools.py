@@ -103,10 +103,14 @@ def register_tools(mcp:Any)->None:
                                    text=True,timeout=timeout_seconds)
         except subprocess.TimeoutExpired:
             return {'gate':gate,'status':'TIMEOUT','elapsed_limit':timeout_seconds}
+        # Browser output is untrusted tenant data: even diagnostic lines may
+        # include passwords, names, scanner URLs or private attachment content.
+        # Summarise by fixed labels only. Full reports stay private on MCP01.
         output=(result.stdout+'\n'+result.stderr).splitlines()
-        # Reports may contain sensitive tenant names. Return only PASS/FAIL and
-        # scrubbed error-class lines, not raw pages or screenshots.
-        findings=[x[:160] for x in output if re.search(r'\b(PASS|FAIL|ERROR|WARNING)\b',x,re.I)]
+        kinds={'PASS':0,'FAIL':0,'ERROR':0,'WARNING':0}
+        for line in output:
+            for match in set(re.findall(r'\b(PASS|FAIL|ERROR|WARNING)\b',line,re.I)):
+                kinds[match.upper()]+=1
         return {'gate':gate,'status':'PASS' if result.returncode==0 else 'FAIL',
-                'exit_code':result.returncode,'findings':findings[-12:],
-                'detail_lines_omitted':max(0,len(output)-len(findings))}
+                'exit_code':result.returncode,'finding_class_counts':kinds,
+                'private_output_lines':len(output)}

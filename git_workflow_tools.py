@@ -6,7 +6,6 @@ import re
 import subprocess
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 from mcp.types import ToolAnnotations
 
 HOME = Path('/home/gptagent')
@@ -19,6 +18,15 @@ REPOSITORIES = {
 }
 SIGNER = 'F4B21C66B3C84DBE114CD6FE764C5FCF43B57DBA'
 EMAIL = 'artur.fronczek+gitea_gpt@gmail.com'
+# Exact repository identities, not merely host names. Git may have an independent
+# pushurl or multiple pushurls; every effective destination must be verified.
+ORIGIN_REPOSITORIES = {
+    'hbf-mcp': ('github.com', 'fronczek/hbf-mcp'),
+    'ese-agent': ('git.hbf.pl', 'secnet/ese-agent'),
+    'hbf-gpt-gitea': ('git.hbf.pl', 'hbf/hbf-gpt-gitea'),
+    'hbf-gpt-mailer': ('git.hbf.pl', 'hbf/hbf-gpt-mailer'),
+    'hbf-azure-ocr': ('git.hbf.pl', 'hbf/hbf-azure-ocr'),
+}
 BRANCH = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_./-]{0,110}$')
 SECRET = re.compile(r'(^|/)(\.env(?:\.|$)|credentials?(?:/|$)|secrets?(?:/|$)|\.ssh/|\.gnupg/)|(?:\.pem|\.key|\.p12|\.pfx)$',re.I)
 
@@ -48,18 +56,24 @@ def _git(repo: str, *args: str, timeout: int = 35) -> str:
 
 
 def _remote(repo: str) -> str:
-    url = _git(repo,'remote','get-url','origin')
-    if not (url.startswith('git@github.com:') or url.startswith('git@git.hbf.pl:')
-            or url.startswith('https://github.com/') or url.startswith('https://git.hbf.pl/')):
-        raise RuntimeError('Untrusted Git remote; refusing network operation')
-    if any(x in url for x in ('?', '#','@github.com/')) or url.count('@') > 1:
-        raise RuntimeError('Unexpected Git remote URL')
-    return url
+    """Validate *all* fetch URLs and all effective push URLs for this repo.
+
+    `git remote get-url --push --all` resolves Git URL rewrites and custom
+    pushurl entries. `get-url` without --push is NOT a safety check for push.
+    """
+    host, name = ORIGIN_REPOSITORIES[repo]
+    allowed = {f'git@{host}:{name}', f'git@{host}:{name}.git',
+               f'https://{host}/{name}', f'https://{host}/{name}.git'}
+    fetch = _git(repo, 'remote', 'get-url', '--all', 'origin').splitlines()
+    push = _git(repo, 'remote', 'get-url', '--push', '--all', 'origin').splitlines()
+    if not fetch or not push or any(url not in allowed for url in fetch + push):
+        raise RuntimeError('Untrusted Git origin fetch/push destination; refusing network operation')
+    return fetch[0]
 
 
 def _branch_name(name: str) -> str:
     if (not BRANCH.fullmatch(name) or name.endswith('/') or '..' in name or
-            '@{' in name or name.endswith('.lock') or '// ' in name):
+            '@{' in name or name.endswith('.lock') or '//' in name):
         raise ValueError('Invalid branch name')
     return name
 
