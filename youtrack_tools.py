@@ -93,7 +93,8 @@ def register_tools(mcp: Any) -> None:
     """Attach narrowly scoped YouTrack methods to an existing MCP FastMCP app."""
 
     read = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True)
-    write = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
+    write = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
+    state_write = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
 
     @mcp.tool(annotations=read)
     def youtrack_search_issues(query: str = "", limit: int = 15, skip: int = 0) -> dict:
@@ -139,7 +140,7 @@ def register_tools(mcp: Any) -> None:
             "author":(x.get("author") or {}).get("login"),"created":x.get("created"),
             "excerpt":(x.get("text") or "")[:1200]} for x in obj]}
 
-    @mcp.tool(annotations=write)
+    @mcp.tool(annotations=state_write)
     def youtrack_apply_state(issue_id: str, new_state: str) -> dict:
         """Change ESE issue state via YouTrack command API (explicit state only)."""
         allowed={"Open","In Progress","Fixed","Verified","Reopened","To Do"}

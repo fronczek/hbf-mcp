@@ -18,6 +18,20 @@ CONFIG=Path('/home/gptagent/credentials/ese-browser.json')
 ESE=re.compile(r'^ESE-[1-9][0-9]{0,6}$')
 
 
+def _error_category(stderr: str) -> str:
+    """Classify helper failure without returning potentially sensitive stderr."""
+    lower = stderr.lower()
+    if any(term in lower for term in ("401", "403", "unauthorized", "forbidden")):
+        return "authentication"
+    if any(term in lower for term in ("timeout", "timed out")):
+        return "timeout"
+    if any(term in lower for term in ("connection refused", "unreachable", "dns", "name resolution")):
+        return "connectivity"
+    if "404" in lower:
+        return "api_not_found"
+    return "unknown"
+
+
 def _run(args:list[str], *, timeout:int=35, stdin:str|None=None, cwd:Path|None=None,
          env:dict|None=None) -> str:
     if not Path(args[0]).is_file():
@@ -28,7 +42,7 @@ def _run(args:list[str], *, timeout:int=35, stdin:str|None=None, cwd:Path|None=N
     except subprocess.TimeoutExpired:
         raise RuntimeError('Local helper timed out; inspect existing session before retry') from None
     if result.returncode:
-        raise RuntimeError(f'Local helper returned status {result.returncode}; inspect existing state')
+        raise RuntimeError(f'Local helper returned status {result.returncode}; inspect existing state (stderr category: {_error_category(result.stderr)})')
     if len(result.stdout)>160_000:
         raise RuntimeError('Helper output exceeds bound; inspect report locally')
     return result.stdout
