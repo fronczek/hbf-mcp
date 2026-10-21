@@ -794,6 +794,8 @@ from diagnostics_tools import register_tools as register_diagnostics_tools
 register_git_workflow_tools(mcp)
 register_agent_tools(mcp)
 register_diagnostics_tools(mcp)
+from zabbix_tools import register_tools as register_zabbix_tools
+register_zabbix_tools(mcp)
 
 if __name__ == "__main__":
     mcp.run(

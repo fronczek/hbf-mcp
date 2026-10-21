@@ -58,7 +58,7 @@ GIT_MUTATING_TOOLS = {"git_workflow_sync", "git_workflow_branch", "git_workflow_
                       "git_workflow_signed_commit", "git_workflow_push"}
 AGENT_READ_ONLY_TOOLS = {"deepseek_sessions"}
 AGENT_MUTATING_TOOLS = {"deepseek_flash_task", "ese_browser_gate"}
-READ_ONLY_TOOLS |= GIT_READ_ONLY_TOOLS | AGENT_READ_ONLY_TOOLS | {"mcp_health","mcp_api_health",
+READ_ONLY_TOOLS |= GIT_READ_ONLY_TOOLS | AGENT_READ_ONLY_TOOLS | {"mcp_health","mcp_api_health","zabbix_health",
                        "youtrack_search_issues","youtrack_issue_detail","youtrack_issue_comments",
                        "gitea_ci_summary"}
 MUTATING_TOOLS |= GIT_MUTATING_TOOLS | AGENT_MUTATING_TOOLS | {"youtrack_apply_state"}

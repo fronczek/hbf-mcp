@@ -195,3 +195,22 @@ sudo systemctl restart hbf-mcp
 The server uses the official Python MCP SDK v2 and Streamable HTTP.
 
 The service is configured as stateless HTTP with JSON responses because the current toolset does not require server-initiated callbacks.
+
+## Zabbix read-only monitoring
+
+Install the tracked `bin/zabbix-watch` at `/home/gptagent/bin/zabbix-watch`
+(mode 0755); keep `zabbix.yml` (0600) in `/home/gptagent/credentials/`.
+Install `python3-yaml` and `python3-requests` from Ubuntu packages for the
+system Python used by the helper. Register `zabbix_tools.py` along with
+`server.py`, then restart `hbf-mcp.service` and refresh ChatGPT connector tools.
+
+`zabbix_health(lookback_hours=24)` returns current unresolved High/Disaster
+alerts (separating fresh and stale), availability incidents, and bounded CPU/NVMe
+history for the two Minisforum PVE hosts. It never exposes credentials or
+accepts arbitrary API paths, hostnames, URLs or mutating methods.
+
+For manual checks before a controlled service restart:
+
+```bash
+/home/gptagent/bin/zabbix-watch --hours 24
+```
