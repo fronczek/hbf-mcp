@@ -117,7 +117,7 @@ preference, not a blanket SSH prohibition.
 PR publication does not activate runtime tools. Administrator should review
 and merge, deploy from source to `/opt/hbf-mcp` with the existing installer or
 copy source modules, then do a controlled `systemctl restart hbf-mcp.service`.
-The installed `/etc/hbf-mcp.env` must remain private and untouched. Refresh
+The instance-local `/opt/hbf-mcp-NAME/.env` remains private and is preserved on upgrade. Refresh
 ChatGPT's MCP tool list and verify `mcp_health`, `git_workflow_status`,
 `gitea_connection`, `youtrack_issue_overview` with read-only operations.
 

@@ -1,0 +1,14 @@
+# Bash completion for the systemd-backed HBF MCP instances.
+_hbf_mcp_service_completion()
+{
+    if [[ ${COMP_CWORD} -eq 2 && ( ${COMP_WORDS[1]} == hbf-mcp || ${COMP_WORDS[1]} == hbf-mcp-* ) ]]; then
+        mapfile -t COMPREPLY < <(compgen -W 'start stop restart status' -- "${COMP_WORDS[COMP_CWORD]}")
+    elif declare -F _comp_complete_service >/dev/null; then
+        _comp_complete_service "$@"
+    elif declare -F _service >/dev/null; then
+        _service "$@"
+    else
+        COMPREPLY=()
+    fi
+}
+complete -F _hbf_mcp_service_completion service

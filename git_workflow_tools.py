@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 from mcp.types import ToolAnnotations
 
-HOME = Path('/home/gptagent')
+HOME = Path(os.getenv('HBF_MCP_AGENT_HOME', '/home/gptagent'))
 REPOSITORIES = {
     'hbf-mcp': HOME/'projects/hbf-mcp-upstream-review',
     'ese-agent': HOME/'projects/esekretariat/ese-agent',

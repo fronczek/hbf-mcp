@@ -22,8 +22,9 @@ from typing import Any, Literal
 
 from mcp.types import ToolAnnotations
 
-CREDENTIAL_FILE = Path("/home/gptagent/credentials/gitea.yml")
-DB_FILE = Path("/home/gptagent/.local/state/hbf-mcp-gitea/operations.sqlite3")
+AGENT_HOME = Path(os.getenv("HBF_MCP_AGENT_HOME", "/home/gptagent"))
+CREDENTIAL_FILE = AGENT_HOME / "credentials/gitea.yml"
+DB_FILE = AGENT_HOME / ".local/state/hbf-mcp-gitea/operations.sqlite3"
 DEFAULT_REPOS = (
     "secnet/ese-agent", "secnet/ese-backend", "secnet/ese-frontend",
     "secnet/ese-ansible", "hbf/hbf-gpt-gitea", "hbf/hbf-gpt-mailer",

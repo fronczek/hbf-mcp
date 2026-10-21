@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import statistics
 import sys
 import time
@@ -17,7 +18,7 @@ from pathlib import Path
 import requests
 import yaml
 
-CREDENTIALS = Path('/home/gptagent/credentials/zabbix.yml')
+CREDENTIALS = Path(os.getenv('HBF_MCP_AGENT_HOME', '/home/gptagent')) / 'credentials/zabbix.yml'
 MONITORED = ('hbfplhpved01', 'hbfplhpved02')
 SENSOR_KEYS = {
     'cpu_c': 'hw.sensor.temp[coretemp-isa-0000,Package id 0]',

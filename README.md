@@ -59,48 +59,36 @@ Suggested VM size:
 - 2-4 GB RAM
 - 20 GB disk
 
-## Install
+## Install, list and upgrade instances
 
-Run as root:
+Run as root on Debian/Ubuntu:
 
 ```bash
 git clone https://github.com/fronczek/hbf-mcp.git
 cd hbf-mcp
-bash ./install.sh
+./install                    # list instances and service state
+./install artur afronczek     # install or upgrade hbf-mcp-artur
+./install mariusz mhejczyk    # install or upgrade hbf-mcp-mariusz
 ```
 
-The installer backs up an existing installation under /var/backups/hbf-mcp,
-installs dependencies, deploys the source, restarts the service and checks it is active.
-
-Optional diagnostics:
-
-```bash
-systemctl status hbf-mcp --no-pager
-journalctl -u hbf-mcp -f
-ss -lntp | grep 8765
-```
-
-## Upgrade
-
-Run as root in the existing checkout:
+Instances live under /opt/hbf-mcp-NAME with their own .env, venv, systemd unit
+and selected Unix account. Ports start at 8765 and increment, skipping reserved
+or occupied ports; upgrades keep the existing port and configuration.
 
 ```bash
 git pull --ff-only
-bash ./install.sh
+./install artur afronczek
+service hbf-mcp-artur restart
 ```
 
-The same installer preserves existing configuration, credentials and operation state,
-backs up the previous installation, updates dependencies and restarts the service.
+The installer makes a private backup, installs dependencies and helpers, preserves
+existing configuration/data and restarts the selected service. Without arguments
+it only lists instances. install.sh forwards to the same interface.
 
-## Local test
-
-The repository includes a tiny MCP client.
-
-```bash
-sudo -u gptagent /opt/hbf-mcp/.venv/bin/python /opt/hbf-mcp/test_client.py
-```
-
-It should list the available tools and call `info`.
+Service actions: start, stop, restart, status. For completion in an existing Bash
+session, source /etc/bash_completion.d/hbf-mcp once; new shells load it automatically.
+See [the installation runbook](docs/refresh-stack.pl.md) for configuration, rollback,
+legacy-instance handling and ChatGPT metadata refresh.
 
 ## Typed REST and workflow tools (October 2026)
 
@@ -182,7 +170,7 @@ port 8765 access) is what protects the endpoint.
 Environment file:
 
 ```text
-/etc/hbf-mcp.env
+/opt/hbf-mcp-NAME/.env
 ```
 
 The full set of keys is in [`hbf-mcp.env.example`](hbf-mcp.env.example). The
@@ -204,7 +192,7 @@ write roots both default to `HBF_MCP_DEFAULT_CWD`.
 After editing it:
 
 ```bash
-sudo systemctl restart hbf-mcp
+service hbf-mcp-artur restart
 ```
 
 ## MCP protocol

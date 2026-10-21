@@ -8,7 +8,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
-CRED = "/home/gptagent/credentials/influxdb.yml"
+CRED = os.path.join(os.getenv("HBF_MCP_AGENT_HOME", "/home/gptagent"), "credentials/influxdb.yml")
 
 
 def load_config():
