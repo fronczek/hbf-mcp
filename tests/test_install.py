@@ -39,6 +39,8 @@ def installer(tmp_path):
         script = script.replace(old, new)
     # Port availability is mocked; allocated and reserved port logic remains real.
     script = script.replace('probe.bind(("0.0.0.0", port))', "None")
+    script = script.replace('socket.create_connection((host, port), timeout=1)',
+                            '__import__("contextlib").nullcontext()')
     (source / "install").write_text(script)
 
     commands = tmp_path / "commands"
@@ -223,3 +225,82 @@ print(json.dumps({"paths": [str(p) for p in paths],
     # Installed instance .env and fallback both select the correct log service.
     if "HBF_MCP_ALLOWED_LOG_SERVICES" not in env:
         assert data["logs"] == ["hbf-mcp-test"]
+
+
+def legacy_fixture(tmp_path):
+    legacy = tmp_path / "opt/hbf-mcp"
+    legacy.mkdir(parents=True)
+    (legacy / "server.py").write_text("# original runtime\n")
+    env = tmp_path / "etc/hbf-mcp.env"
+    env.write_text('HBF_MCP_PORT=8765\nSYNTHETIC_SECRET=keep-me\n'
+                   'HBF_MCP_ALLOWED_LOG_SERVICES="hbf-mcp,ssh"\n')
+    unit = tmp_path / "etc/systemd/system/hbf-mcp.service"
+    unit.write_text("# original legacy unit\n")
+    systemctl = tmp_path / "commands/systemctl"
+    systemctl.write_text(systemctl.read_text() +
+        'if [ "$1:$2:$3" = "show:hbf-mcp:-p" ] && [ "$4" = "User" ]; then echo gptagent; fi\n'
+        'if [ "$1:$2" = "is-enabled:hbf-mcp" ]; then echo enabled; fi\n')
+    return legacy, env, unit, systemctl
+
+
+def test_legacy_migration_keeps_port_secrets_identity_and_masks_old_service(tmp_path, installer):
+    _, run = installer
+    legacy, env, unit, _ = legacy_fixture(tmp_path)
+    original = env.read_text()
+    state = tmp_path / "homes/gptagent/credentials/private.yml"
+    state.parent.mkdir(parents=True)
+    state.write_text("unchanged")
+    run("artur", "gptagent", "--migrate-legacy")
+    target = tmp_path / "opt/hbf-mcp-artur"
+    assert (target / ".env").read_text() == original.replace('"hbf-mcp,', '"hbf-mcp-artur,')
+    assert (target / ".env").stat().st_mode & 0o777 == 0o600
+    assert env.read_text() == original
+    assert state.read_text() == "unchanged"
+    assert unit.is_symlink() and unit.readlink() == Path("/dev/null")
+    assert (legacy / ".migrated-to").read_text().strip() == "hbf-mcp-artur"
+    calls = (tmp_path / "service-calls").read_text()
+    assert calls.index("stop hbf-mcp\n") < calls.index("restart hbf-mcp-artur\n")
+    assert "disable hbf-mcp\n" in calls
+    backup, = (tmp_path / "backups/hbf-mcp-artur").iterdir()
+    assert (backup / "legacy.env").read_text() == original
+    assert (backup / "legacy-runtime/server.py").read_text() == "# original runtime\n"
+    # Re-running ordinary install upgrades; migration cannot overwrite a target.
+    run("artur", "gptagent", "--migrate-legacy", ok=False)
+    run("artur", "gptagent", "--port", "8765")
+
+
+def test_failed_migration_restores_legacy_and_can_be_retried(tmp_path, installer):
+    _, run = installer
+    legacy, env, unit, systemctl = legacy_fixture(tmp_path)
+    content = systemctl.read_text()
+    systemctl.write_text(content + 'if [ "$1:$2" = "restart:hbf-mcp-artur" ]; then exit 1; fi\n')
+    helper = tmp_path / "homes/gptagent/bin/zabbix-watch"
+    helper.parent.mkdir(parents=True)
+    helper.write_text("old helper")
+    result = run("artur", "gptagent", "--migrate-legacy", ok=False)
+    assert "Migration failed" in result.stderr
+    assert not (tmp_path / "opt/hbf-mcp-artur").exists()
+    assert unit.read_text() == "# original legacy unit\n"
+    assert helper.read_text() == "old helper"
+    assert not (legacy / ".migrated-to").exists()
+    assert "start hbf-mcp\n" in (tmp_path / "service-calls").read_text()
+    systemctl.write_text(content)
+    run("artur", "gptagent", "--migrate-legacy")
+
+
+def test_migration_rejects_account_change_before_mutation(tmp_path, installer):
+    _, run = installer
+    legacy_fixture(tmp_path)
+    run("artur", "afronczek", "--migrate-legacy", ok=False)
+    assert not (tmp_path / "opt/hbf-mcp-artur").exists()
+    assert not (tmp_path / "backups").exists()
+
+
+def test_migration_package_failure_leaves_old_service_running(tmp_path, installer):
+    _, run = installer
+    legacy_fixture(tmp_path)
+    (tmp_path / "commands/apt-get").write_text("#!/bin/sh\nexit 1\n")
+    run("artur", "gptagent", "--migrate-legacy", ok=False)
+    calls = (tmp_path / "service-calls").read_text()
+    assert "stop hbf-mcp\n" not in calls
+    assert not (tmp_path / "opt/hbf-mcp-artur").exists()

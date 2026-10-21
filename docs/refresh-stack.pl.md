@@ -86,15 +86,59 @@ Uzupełnianie pozostałych usług jest delegowane do standardowego completion.
 
 ## Obecna nienazwana instalacja
 
-Stara hbf-mcp jest widoczna w ./install i jej port jest uwzględniany przy
-wyborze wolnego portu. Instalator nowych instancji nie wyłącza jej ani nie
-przepisuje jej konfiguracji na inne konto. Jeżeli zajmuje 8765, nowa instancja
-dostanie 8766.
+Zwykła instalacja nazwanej instancji pozostawia starą usługę bez zmian i omija
+jej port. Aby przenieść obecną instalację, jako root w checkout po aktualizacji:
 
-Nowe instancje nie korzystają z /etc/hbf-mcp.env. Stary plik służy wyłącznie
-do odczytu portu istniejącej starej instalacji. Przełączenie połączenia ChatGPT
-lub proxy na nową usługę i późniejsze wycofanie starej instalacji to osobny
-krok po sprawdzeniu nowej instancji.
+```bash
+git pull --ff-only
+./install artur gptagent --migrate-legacy
+./install
+service hbf-mcp-artur status
+```
+
+Tryb migracji wymaga aktywnej starej usługi, tego samego konta oraz pustego
+katalogu docelowego. Odrzuca migrację jednostki z dodatkowymi drop-inami systemd,
+które wymagają osobnego przeglądu. Zachowuje dotychczasowy port (na naszym
+serwerze 8765), dane, credentials i repozytoria konta gptagent. Kopiuje konfigurację
+do /opt/hbf-mcp-artur/.env (root:root, 0600); w selektorze logów zastępuje
+hbf-mcp nazwą nowej usługi. Adres proxy/ChatGPT pozostaje ten sam.
+
+Najpierw tworzy kopię starego runtime/venv, konfiguracji, jednostki i helperów
+w /var/backups/hbf-mcp-artur, a potem przygotowuje nowe zależności i kod.
+Dopiero wtedy zatrzymuje starą usługę, uruchamia nową, czeka do 30 sekund na
+nasłuch TCP i ponownie sprawdza stan systemd. Przełączenie przerywa aktualną
+sesję MCP; po nim otwórz nowe połączenie/rozmowę.
+
+Przy błędzie próbuje automatycznie przywrócić starą usługę i helpery,
+a nieudaną instalację przenosi do backupu. Nie cofa pakietów apt.
+Po sukcesie wyłącza autostart i maskuje hbf-mcp, aby nie zajęła ponownie tego
+samego portu. Stary runtime i /etc/hbf-mcp.env pozostają do ręcznego rollbacku;
+nowa usługa z nich nie korzysta. ./install pokazuje już tylko nową instancję.
+
+Kolejne aktualizacje wykonuj bez flagi migracji:
+
+```bash
+git pull --ff-only
+./install artur gptagent
+```
+
+Ręczny powrót po udanej migracji (jako root, z właściwą ścieżką kopii):
+
+```bash
+backup_dir=/var/backups/hbf-mcp-artur/KOPIA-WYPISANA-PRZEZ-INSTALATOR
+test -f "$backup_dir/legacy.service" || exit 1
+systemctl disable --now hbf-mcp-artur
+rm /etc/systemd/system/hbf-mcp.service
+cp -a "$backup_dir/legacy.service" /etc/systemd/system/hbf-mcp.service
+for helper in zabbix-watch kuk-boiler-watch; do
+  if [[ -f "$backup_dir/$helper" ]]; then
+    cp -a "$backup_dir/$helper" "/home/gptagent/bin/$helper"
+  fi
+done
+rm -f /opt/hbf-mcp/.migrated-to
+systemctl daemon-reload
+systemctl enable --now hbf-mcp
+```
 
 ## ChatGPT i diagnostyka
 

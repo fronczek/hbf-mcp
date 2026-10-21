@@ -85,6 +85,17 @@ The installer makes a private backup, installs dependencies and helpers, preserv
 existing configuration/data and restarts the selected service. Without arguments
 it only lists instances. install.sh forwards to the same interface.
 
+Migrate the existing unnamed service while keeping its account, port and settings:
+
+```bash
+./install artur gptagent --migrate-legacy
+```
+
+The installer backs up the legacy runtime/config/unit, prepares the new runtime
+before stopping the old service, checks the new listener and rolls back on failure.
+On success, the old service is disabled and masked; account-owned data stays in place.
+Subsequent upgrades use `./install artur gptagent` without the migration flag.
+
 Service actions: start, stop, restart, status. For completion in an existing Bash
 session, source /etc/bash_completion.d/hbf-mcp once; new shells load it automatically.
 See [the installation runbook](docs/refresh-stack.pl.md) for configuration, rollback,

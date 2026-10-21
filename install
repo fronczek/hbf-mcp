@@ -6,7 +6,7 @@ if (($# == 0)); then
   printf '%-20s %-18s %-8s %-14s %s\n' INSTANCE USER PORT STATE DIRECTORY
   found=0
   for directory in /opt/hbf-mcp /opt/hbf-mcp-*; do
-    [[ -d "$directory" ]] || continue
+    [[ -d "$directory" && ! -f "$directory/.migrated-to" ]] || continue
     found=1
     name="${directory##*/}"
     account="unknown"
@@ -26,17 +26,23 @@ if (($# == 0)); then
   exit 0
 fi
 if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
-  echo "Usage: ./install [NAME USER [--port PORT]]"
+  echo "Usage: ./install [NAME USER [--port PORT | --migrate-legacy]]"
   exit 0
 fi
-[[ $# -ge 2 ]] || { echo "Usage: ./install NAME USER [--port PORT]" >&2; exit 2; }
+[[ $# -ge 2 ]] || { echo "Usage: ./install NAME USER [--port PORT | --migrate-legacy]" >&2; exit 2; }
 INSTANCE="$1"
 REQUESTED_USER="$2"
 REQUESTED_PORT=""
+MIGRATE_LEGACY=0
 shift 2
 if (($#)); then
-  [[ $# == 2 && "$1" == --port ]] || { echo "Expected --port PORT" >&2; exit 2; }
-  REQUESTED_PORT="$2"
+  if [[ $# == 1 && "$1" == --migrate-legacy ]]; then
+    MIGRATE_LEGACY=1
+  elif [[ $# == 2 && "$1" == --port ]]; then
+    REQUESTED_PORT="$2"
+  else
+    echo "Expected --port PORT or --migrate-legacy" >&2; exit 2
+  fi
 fi
 if [[ "${EUID}" -ne 0 ]]; then
   echo "Run as root: ./install NAME USER" >&2
@@ -79,21 +85,79 @@ done
 # Serialize upgrades and allocate ports consecutively from 8765.
 exec 9>/run/lock/hbf-mcp-install.lock
 flock -n 9 || { echo "Another HBF MCP installation is running" >&2; exit 1; }
+# Migration preserves the service identity and all account-owned credentials/state.
+LEGACY_DIR=/opt/hbf-mcp
+LEGACY_ENV=/etc/hbf-mcp.env
+LEGACY_UNIT=/etc/systemd/system/hbf-mcp.service
+if ((MIGRATE_LEGACY)); then
+  [[ ! -e "$INSTALL_DIR" && ! -e "$UNIT_FILE" ]] || {
+    echo "Migration target already exists; use a normal upgrade or inspect it first" >&2; exit 2;
+  }
+  [[ -d "$LEGACY_DIR" && -f "$LEGACY_ENV" && -f "$LEGACY_UNIT" ]] || {
+    echo "Legacy runtime, configuration and unit are required" >&2; exit 2;
+  }
+  [[ "$(systemctl show hbf-mcp -p User --value)" == "$SERVICE_USER" ]] || {
+    echo "Migration must keep the legacy service account" >&2; exit 2;
+  }
+  [[ -z "$(systemctl show hbf-mcp -p DropInPaths --value)" ]] || {
+    echo "Legacy systemd drop-ins require manual review before migration" >&2; exit 2;
+  }
+  systemctl is-active --quiet hbf-mcp || {
+    echo "Legacy service must be active before migration" >&2; exit 2;
+  }
+fi
 # Back up before changing packages, dependencies, sources or configuration.
 BACKUP_DIR=""
-if [[ -d "$INSTALL_DIR" || -f "$UNIT_FILE"  ]]; then
+if [[ -d "$INSTALL_DIR" || -f "$UNIT_FILE" ]] || ((MIGRATE_LEGACY)); then
   install -d -o root -g root -m 0700 "/var/backups/${SERVICE_NAME}"
   BACKUP_DIR="$(mktemp -d "/var/backups/${SERVICE_NAME}/$(date +%Y%m%d-%H%M%S).XXXXXX")"
   chmod 0700 "$BACKUP_DIR"
   [[ ! -d "$INSTALL_DIR" ]] || cp -a "$INSTALL_DIR" "$BACKUP_DIR/runtime"
   [[ ! -f "$UNIT_FILE" ]] || cp -a "$UNIT_FILE" "$BACKUP_DIR/hbf-mcp.service"
+  if ((MIGRATE_LEGACY)); then
+    cp -a "$LEGACY_DIR" "$BACKUP_DIR/legacy-runtime"
+    cp -a "$LEGACY_ENV" "$BACKUP_DIR/legacy.env"
+    cp -a "$LEGACY_UNIT" "$BACKUP_DIR/legacy.service"
+    systemctl is-enabled hbf-mcp > "$BACKUP_DIR/legacy-enabled" || true
+  fi
   echo "Previous installation backup: $BACKUP_DIR"
 fi
+
+MIGRATION_SWITCHED=0
+rollback_migration() {
+  result=$?
+  trap - EXIT
+  if ((MIGRATE_LEGACY && result != 0)); then
+    set +e
+    systemctl disable "$SERVICE_NAME"
+    if ((MIGRATION_SWITCHED)); then
+      systemctl stop "$SERVICE_NAME"
+      rm -f "$LEGACY_UNIT" "$LEGACY_DIR/.migrated-to"
+      cp -a "$BACKUP_DIR/legacy.service" "$LEGACY_UNIT"
+      systemctl daemon-reload
+      if [[ "$(cat "$BACKUP_DIR/legacy-enabled")" == enabled ]]; then
+        systemctl enable hbf-mcp
+      fi
+      systemctl start hbf-mcp
+    fi
+    for helper in zabbix-watch kuk-boiler-watch; do
+      if [[ -f "$BACKUP_DIR/$helper" ]]; then
+        cp -a "$BACKUP_DIR/$helper" "$AGENT_HOME/bin/$helper"
+      fi
+    done
+    [[ ! -d "$INSTALL_DIR" ]] || mv "$INSTALL_DIR" "$BACKUP_DIR/failed-runtime"
+    [[ ! -f "$UNIT_FILE" ]] || mv "$UNIT_FILE" "$BACKUP_DIR/failed.service"
+    systemctl daemon-reload
+    echo "Migration failed; legacy installation retained. Backup: $BACKUP_DIR" >&2
+  fi
+  exit "$result"
+}
+if ((MIGRATE_LEGACY)); then trap rollback_migration EXIT; fi
 
 apt-get update
 apt-get install -y python3 python3-venv python3-pip python3-yaml python3-requests \
   git curl jq openssh-client ca-certificates bash-completion
-if [[ ! -f "$ENV_FILE" || -n "$REQUESTED_PORT" ]]; then
+if (( ! MIGRATE_LEGACY )) && [[ ! -f "$ENV_FILE" || -n "$REQUESTED_PORT" ]]; then
   REQUESTED_PORT="$(python3 - "$INSTALL_DIR" "$REQUESTED_PORT" <<'PY_PORT'
 from pathlib import Path
 import socket
@@ -112,7 +176,8 @@ def read_port(config):
 current = read_port(Path(target) / ".env")
 used = {
     read_port(config) for config in
-    list(Path("/opt").glob("hbf-mcp*/.env")) + [Path("/etc/hbf-mcp.env")]
+    list(Path("/opt").glob("hbf-mcp*/.env")) +
+    ([] if Path("/opt/hbf-mcp/.migrated-to").exists() else [Path("/etc/hbf-mcp.env")])
     if config != Path(target) / ".env"
 }
 for port in ([int(requested)] if requested else range(8765, 65536)):
@@ -176,6 +241,24 @@ for helper in zabbix-watch kuk-boiler-watch; do
 done
 chown -R "$SERVICE_USER:$SERVICE_GROUP" "$INSTALL_DIR"
 
+if ((MIGRATE_LEGACY)); then
+  install -o root -g root -m 0600 "$LEGACY_ENV" "$ENV_FILE"
+  # Only the log service selector changes; secrets and other settings stay intact.
+  "$INSTALL_DIR/.venv/bin/python" - "$ENV_FILE" "$SERVICE_NAME" <<'PY_MIGRATE'
+from pathlib import Path
+import sys
+path, service = Path(sys.argv[1]), sys.argv[2]
+lines = path.read_text().splitlines()
+for i, line in enumerate(lines):
+    if line.startswith("HBF_MCP_ALLOWED_LOG_SERVICES="):
+        value = line.partition("=")[2]
+        quote = value[0] if value and value[0] in "\"'" else ""
+        values = value.strip("\"'").split(",")
+        values = [service if item.strip() == "hbf-mcp" else item for item in values]
+        lines[i] = "HBF_MCP_ALLOWED_LOG_SERVICES=" + quote + ",".join(values) + quote
+path.write_text("\n".join(lines) + "\n")
+PY_MIGRATE
+fi
 if [[ ! -f "$ENV_FILE" ]]; then
   "$INSTALL_DIR/.venv/bin/python" - "$SOURCE_DIR/hbf-mcp.env.example" "$ENV_FILE" "$AGENT_HOME" "$SERVICE_NAME" <<'PY'
 from pathlib import Path
@@ -219,8 +302,43 @@ install -o root -g root -m 0644 "$SOURCE_DIR/completion/hbf-mcp" /etc/bash_compl
 
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"
+if ((MIGRATE_LEGACY)); then
+  MIGRATION_SWITCHED=1
+  systemctl stop hbf-mcp
+fi
 systemctl restart "$SERVICE_NAME"
 systemctl is-active --quiet "$SERVICE_NAME"
+if ((MIGRATE_LEGACY)); then
+  "$INSTALL_DIR/.venv/bin/python" - "$ENV_FILE" <<'PY_READY'
+import socket, sys, time
+from pathlib import Path
+settings = {}
+for line in Path(sys.argv[1]).read_text().splitlines():
+    if "=" in line and not line.lstrip().startswith("#"):
+        key, _, value = line.partition("=")
+        settings[key.strip()] = value.strip().strip("\"'")
+host = settings.get("HBF_MCP_HOST", "127.0.0.1")
+if host in ("0.0.0.0", "::"):
+    host = "127.0.0.1" if host == "0.0.0.0" else "::1"
+port = int(settings.get("HBF_MCP_PORT", "8765"))
+for attempt in range(30):
+    try:
+        with socket.create_connection((host, port), timeout=1):
+            break
+    except OSError:
+        time.sleep(1)
+else:
+    sys.exit("New service did not open its configured port")
+PY_READY
+  systemctl is-active --quiet "$SERVICE_NAME"
+  systemctl disable hbf-mcp
+  # Keep the old runtime/config for manual rollback, prevent accidental double start.
+  ln -sfn /dev/null "$LEGACY_UNIT"
+  systemctl daemon-reload
+  printf '%s\n' "$SERVICE_NAME" > "$LEGACY_DIR/.migrated-to"
+  trap - EXIT
+  echo "Legacy service migrated and masked. Legacy files retained; backup: $BACKUP_DIR"
+fi
 echo "Installed/upgraded $SERVICE_NAME"
 echo "Configuration: $ENV_FILE"
 echo "Port: $(sed -n 's/^HBF_MCP_PORT=//p' "$ENV_FILE" | tail -n 1)"
