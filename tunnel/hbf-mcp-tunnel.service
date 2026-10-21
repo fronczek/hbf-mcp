@@ -9,6 +9,10 @@ Requires=hbf-mcp.service
 Type=simple
 User=hbf-tunnel
 Group=hbf-tunnel
+WorkingDirectory=/var/lib/hbf-mcp-tunnel
+Environment=HOME=/var/lib/hbf-mcp-tunnel
+StateDirectory=hbf-mcp-tunnel
+StateDirectoryMode=0700
 EnvironmentFile=/etc/hbf-mcp-tunnel/tunnel.env
 ExecStartPre=/usr/bin/test -s /etc/hbf-mcp-tunnel/runtime.key
 ExecStart=/usr/local/bin/tunnel-client run --config /etc/hbf-mcp-tunnel/client.yaml

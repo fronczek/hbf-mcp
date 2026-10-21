@@ -20,19 +20,27 @@ Verified official `tunnel-client` version 0.0.16 on MCP01 at
 Configuration and systemd installer are in the `tunnel/` directory of this
 repository. There is no tunnel ID or runtime API key on this VM yet.
 
-## 1. User steps in OpenAI Platform
-1. Open https://platform.openai.com/settings/organization/tunnels
-2. Select the organization that should own MCP01's tunnel and associate the
-   tunnel with the intended **HBF MANAGEMENT ChatGPT workspace**.
-3. Create one tunnel for MCP01, note its `tunnel_...` ID.
-4. Grant the runtime principal Tunnels **Read + Use** (not Manage).
-5. Create a dedicated runtime API key at
-   https://platform.openai.com/settings/organization/api-keys
-   using that principal. Do not use a general admin key.
-6. Never paste this runtime key in chat. Enter it locally using the secure
-   prompt in step 2.
+## 1. OpenAI Platform — tunnel IDs already assigned
+
+- Artur / MCP01: `tunnel_6ad8b44bd0fc8191895d81356ab3651e`
+- Mariusz / MCP02: `tunnel_6ad8b484fdac8191b6d3e3f81793adb3`
+
+Mappings are saved in `tunnel/hosts/<hostname>.conf` (identifiers, **not** keys).
+Installer reads the hostname and uses the proper ID automatically.
+
+**Still required:** one restricted runtime key **per tunnel**, created in
+https://platform.openai.com/settings/organization/api-keys by principals with
+**Tunnels Read + Use** on their own tunnel (not Manage). Keep keys out of
+Git and chat. Associate tunnels with intended HBF ChatGPT workspace and
+limit each plugin's visibility to the respective user.
 
 ## 2. Install / configure / diagnose (root terminal on MCP01)
+Download/verify a complete official tunnel client (unprivileged shell):
+```bash
+cd /home/gptagent/projects/hbf-mcp-upstream-review
+./tunnel/download-client.sh
+```
+
 From a **root shell** on MCP01 (the `gptagent` service account has no sudo):
 ```bash
 cd /home/gptagent/projects/hbf-mcp-upstream-review
@@ -40,6 +48,16 @@ cd /home/gptagent/projects/hbf-mcp-upstream-review
 ./tunnel/install.sh configure
 ./tunnel/install.sh doctor
 ```
+
+For MCP02 repeat from its own checkout and use:
+`HBF_TUNNEL_BINARY=/home/<mcp02-account>/.local/bin/tunnel-client
+./tunnel/install.sh install` (replace the account path). The hostname must
+be `hbfplhmcpu02` so the right ID is selected. Use a different runtime
+API key. The MCP02 destination service is not accessible from MCP01 yet
+over verified SSH, so this step is **not completed**.
+
+`configure` prompts **only** for the runtime key; the tunnel ID is already
+known. The script refuses to overwrite an existing key.
 The `configure` command asks for tunnel ID and runtime API key. It writes only
 root/group-hbf-tunnel-readable files under `/etc/hbf-mcp-tunnel/`.
 `install` deliberately does not start or enable the service. Once `doctor`
