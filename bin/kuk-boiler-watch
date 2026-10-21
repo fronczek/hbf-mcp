@@ -1,0 +1,200 @@
+#!/usr/bin/python3
+import csv
+import io
+import json
+import os
+import statistics
+import urllib.parse
+import urllib.request
+from datetime import datetime, timedelta, timezone
+
+CRED = "/home/gptagent/credentials/influxdb.yml"
+
+
+def load_config():
+    import yaml
+    with open(CRED, "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+    if not isinstance(config, dict):
+        raise ValueError("InfluxDB configuration must be a YAML mapping")
+    required = ("influx_url", "influx_org", "influx_bucket", "influx_token")
+    if any(not isinstance(config.get(key), str) or not config[key].strip() for key in required):
+        raise ValueError("InfluxDB configuration is missing required string fields")
+    return config
+
+
+CONFIG = load_config()
+URL = CONFIG["influx_url"].rstrip("/") + "/api/v2/query?org=" + urllib.parse.quote(CONFIG["influx_org"], safe="")
+BUCKET = CONFIG["influx_bucket"]
+
+
+def load_token():
+    return CONFIG["influx_token"]
+
+def query(flux):
+    req = urllib.request.Request(
+        URL,
+        data=flux.encode("utf-8"),
+        method="POST",
+        headers={
+            "Authorization": "Token " + load_token(),
+            "Accept": "application/csv",
+            "Content-Type": "application/vnd.flux",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return r.read().decode("utf-8")
+
+def rows(csv_text):
+    out = []
+    for row in csv.DictReader(io.StringIO(csv_text)):
+        if not row.get("_time"):
+            continue
+        out.append(row)
+    return out
+
+def dt(s):
+    return datetime.fromisoformat(s.replace("Z", "+00:00"))
+
+now = datetime.now(timezone.utc)
+start = now - timedelta(hours=1)
+
+heater_flux = f'''
+from(bucket:"{BUCKET}")
+  |> range(start:-24h)
+  |> filter(fn:(r)=>r._field=="value" and
+    (r.entity_id=="electric_water_heater_heating_power" or
+     r.entity_id=="electric_water_heater_temperature"))
+  |> keep(columns:["_time","_value","entity_id"])
+  |> sort(columns:["_time"])
+'''
+
+office_flux = f'''
+from(bucket:"{BUCKET}")
+  |> range(start:-1h)
+  |> filter(fn:(r)=>r._field=="value" and
+    (r.entity_id=="325_pl1_main" or r.entity_id=="325_pl1_srv"))
+  |> aggregateWindow(every:1m, fn:mean, createEmpty:false)
+  |> keep(columns:["_time","_value","entity_id"])
+  |> pivot(rowKey:["_time"], columnKey:["entity_id"], valueColumn:"_value")
+  |> map(fn:(r)=>({{_time:r._time, office_l1_w:r["325_pl1_main"]-r["325_pl1_srv"]}}))
+'''
+
+hrows = rows(query(heater_flux))
+orows = rows(query(office_flux))
+
+power_events = [(dt(r["_time"]), float(r["_value"])) for r in hrows if r["entity_id"] == "electric_water_heater_heating_power"]
+temp_events = [(dt(r["_time"]), float(r["_value"])) for r in hrows if r["entity_id"] == "electric_water_heater_temperature"]
+
+# State at start of window.
+power = None
+for t, v in power_events:
+    if t <= start:
+        power = v
+    else:
+        break
+
+# Build 1-minute samples from last known heater state and nearest/last temperature.
+temps_sorted = sorted(temp_events)
+power_sorted = sorted(power_events)
+
+def last_value(events, when, default=None):
+    val = default
+    for t, v in events:
+        if t <= when:
+            val = v
+        else:
+            break
+    return val
+
+office = []
+for r in orows:
+    try:
+        office.append((dt(r["_time"]), float(r["office_l1_w"])))
+    except (KeyError, ValueError):
+        pass
+
+samples = []
+for t, w in office:
+    p = last_value(power_sorted, t, power)
+    temp = last_value(temps_sorted, t)
+    samples.append((t, p, temp, w))
+
+alerts = []
+
+# Condition 1: >=20 consecutive minutes heating at 2000 W and temp rise <3C or falling.
+run = []
+for s in samples + [(None, None, None, None)]:
+    if s[0] is not None and s[1] is not None and 1900 <= s[1] <= 2100:
+        run.append(s)
+    else:
+        if len(run) >= 20:
+            valid_t = [x[2] for x in run if x[2] is not None]
+            if len(valid_t) >= 2:
+                rise = valid_t[-1] - valid_t[0]
+                if rise < 3:
+                    alerts.append({"condition": 1, "minutes": len(run), "temp_rise_c": round(rise,1),
+                                   "from": run[0][0].isoformat(), "to": run[-1][0].isoformat()})
+        run = []
+
+# Condition 2: >=10C drop within any 15-minute window while heating.
+for i, s in enumerate(samples):
+    if s[1] is None or not (1900 <= s[1] <= 2100) or s[2] is None:
+        continue
+    for j in range(i+1, min(i+16, len(samples))):
+        e = samples[j]
+        if e[1] is None or not (1900 <= e[1] <= 2100) or e[2] is None:
+            break
+        if s[2] - e[2] >= 10:
+            alerts.append({"condition": 2, "drop_c": round(s[2]-e[2],1),
+                           "from": s[0].isoformat(), "to": e[0].isoformat()})
+            break
+
+# Condition 3: while heating, OFFICE/L1 clearly lacks the expected ~2kW load for >=3 consecutive minutes.
+bad = []
+for s in samples + [(None, None, None, None)]:
+    if s[0] is not None and s[1] is not None and 1900 <= s[1] <= 2100 and not (1700 <= s[3] <= 2800):
+        bad.append(s)
+    else:
+        if len(bad) >= 3:
+            alerts.append({"condition": 3, "minutes": len(bad),
+                           "office_l1_median_w": round(statistics.median(x[3] for x in bad),1),
+                           "from": bad[0][0].isoformat(), "to": bad[-1][0].isoformat()})
+        bad = []
+
+# Condition 4: OFFICE/L1 looks like heater load for >=15 min while reported power is 0.
+bad = []
+for s in samples + [(None, None, None, None)]:
+    if s[0] is not None and s[1] == 0 and 1700 <= s[3] <= 2800:
+        bad.append(s)
+    else:
+        if len(bad) >= 15:
+            alerts.append({"condition": 4, "minutes": len(bad),
+                           "office_l1_median_w": round(statistics.median(x[3] for x in bad),1),
+                           "from": bad[0][0].isoformat(), "to": bad[-1][0].isoformat()})
+        bad = []
+
+latest_power = power_events[-1] if power_events else (None, None)
+latest_temp = temp_events[-1] if temp_events else (None, None)
+latest_office = office[-1] if office else (None, None)
+
+summary = {
+    "window_utc": {"start": start.isoformat(), "end": now.isoformat()},
+    "latest": {
+        "heating_power_w": latest_power[1],
+        "heating_power_time": latest_power[0].isoformat() if latest_power[0] else None,
+        "temperature_c": latest_temp[1],
+        "temperature_time": latest_temp[0].isoformat() if latest_temp[0] else None,
+        "office_l1_w": round(latest_office[1], 1) if latest_office[1] is not None else None,
+        "office_l1_time": latest_office[0].isoformat() if latest_office[0] else None,
+    },
+    "last_hour": {
+        "office_l1_min_w": round(min((x[1] for x in office), default=0), 1),
+        "office_l1_max_w": round(max((x[1] for x in office), default=0), 1),
+        "temperature_min_c": round(min((x[1] for x in temp_events if x[0] >= start), default=latest_temp[1] or 0), 1),
+        "temperature_max_c": round(max((x[1] for x in temp_events if x[0] >= start), default=latest_temp[1] or 0), 1),
+    },
+    "alerts": alerts,
+    "status": "ALERT" if alerts else "OK",
+}
+print(json.dumps(summary, indent=2, ensure_ascii=False))

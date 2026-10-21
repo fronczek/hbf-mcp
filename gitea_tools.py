@@ -179,8 +179,17 @@ def _db():
 def _operation_status(repo: str, key: str) -> dict:
     if not KEYPAT.fullmatch(key):
         raise ValueError("idempotency_key must be 8..128 alphanumeric characters/.-_:")
-    with _db() as db:
-        row = db.execute("SELECT status,result,error,created_at FROM operation WHERE key=? AND repo=?", (key, repo)).fetchone()
+    if not DB_FILE.is_file():
+        return {"status": "not_found"}
+    # Status is a read-only MCP tool: never create the DB, directories or schema.
+    try:
+        db = sqlite3.connect(DB_FILE.resolve().as_uri() + "?mode=ro", uri=True, timeout=10)
+        try:
+            row = db.execute("SELECT status,result,error,created_at FROM operation WHERE key=? AND repo=?", (key, repo)).fetchone()
+        finally:
+            db.close()
+    except sqlite3.Error:
+        raise RuntimeError("Operation status database unavailable; do not repeat an uncertain write") from None
     return ({"status": row[0], "result": json.loads(row[1]) if row[1] else None,
              "error": row[2], "created_at": row[3]} if row else {"status": "not_found"})
 

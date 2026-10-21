@@ -189,3 +189,15 @@ def test_live_server_shell_runs_over_http(live_server):
     result = asyncio.run(run())
     assert result.is_error is False
     assert "live-mcp" in result.structured_content["stdout"]
+
+
+def test_deployment_client_checks_running_source_over_http(live_server):
+    url, _ = live_server
+    env = os.environ.copy()
+    env["HBF_MCP_TEST_URL"] = url
+    proc = subprocess.run(
+        [sys.executable, str(ROOT / "test_client.py")],
+        env=env, capture_output=True, text=True, timeout=20,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "Runtime source matches disk:" in proc.stdout

@@ -34,7 +34,7 @@ def register_tools(mcp:Any)->None:
     read=ToolAnnotations(readOnlyHint=True,destructiveHint=False,idempotentHint=True,openWorldHint=False)
 
     @mcp.tool(annotations=read)
-    def mcp_health() -> dict:
+    def mcp_health() -> dict[str, Any]:
         """Inspect local MCP01 service and optional helper readiness (without secrets)."""
         from importlib.util import find_spec
         try:
@@ -46,26 +46,34 @@ def register_tools(mcp:Any)->None:
         modules={name:(ROOT/(name+'.py')).is_file() for name in
                  ('gitea_tools','youtrack_tools','git_workflow_tools',
                   'agent_tools','diagnostics_tools','zabbix_tools')}
-        disk_fingerprint = source_fingerprint(SOURCE_ROOT)
+        try:
+            disk_fingerprint = source_fingerprint(SOURCE_ROOT)
+            source_readable = True
+        except OSError:
+            disk_fingerprint = None
+            source_readable = False
         return {'host':'hbfplhmcpu01','service':service,
                 'loaded_source_sha256':LOADED_SOURCE_FINGERPRINT,
                 'disk_source_sha256':disk_fingerprint,
                 'restart_required':disk_fingerprint != LOADED_SOURCE_FINGERPRINT,
+                'runtime_sources_readable':source_readable,
                 'modules_on_disk':modules,
                 'credentials_configured':{
                     'gitea':(HOME/'credentials/gitea.yml').is_file(),
                     'youtrack':(HOME/'credentials/youtrack.yml').is_file(),
                     'ese_browser':(HOME/'credentials/ese-browser.json').is_file(),
-                    'zabbix':(HOME/'credentials/zabbix.yml').is_file()},
+                    'zabbix':(HOME/'credentials/zabbix.yml').is_file(),
+                    'influxdb':(HOME/'credentials/influxdb.yml').is_file()},
                 'helpers_present':{
                     'dsh_api':(HOME/'bin/dsh-remote').is_file(),
                     'zabbix_watch':(HOME/'bin/zabbix-watch').is_file(),
+                    'boiler_watch':(HOME/'bin/kuk-boiler-watch').is_file(),
                     'playwright':(HOME/'projects/esekretariat/ese-agent/tools/browser/node_modules').is_dir()},
                 'shell_enabled_in_service':True,
                 'notes':'Disk presence does not prove registered tools are active; refresh tools after service restart.'}
 
     @mcp.tool(annotations=read)
-    def mcp_api_health() -> dict:
+    def mcp_api_health() -> dict[str, Any]:
         """Check GPT's fixed Gitea/YouTrack API identities without disclosing tokens."""
         checks={}
         try:
