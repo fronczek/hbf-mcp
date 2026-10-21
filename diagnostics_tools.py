@@ -13,7 +13,7 @@ HOME=Path('/home/gptagent')
 
 SOURCE_ROOT = Path(__file__).resolve().parent
 SOURCE_FILES = ('server.py', 'gitea_tools.py', 'youtrack_tools.py',
-                'git_workflow_tools.py', 'agent_tools.py', 'diagnostics_tools.py')
+                'git_workflow_tools.py', 'agent_tools.py', 'diagnostics_tools.py', 'zabbix_tools.py')
 
 
 def source_fingerprint(root: Path) -> str:
@@ -45,7 +45,7 @@ def register_tools(mcp:Any)->None:
             service='unknown'
         modules={name:(ROOT/(name+'.py')).is_file() for name in
                  ('gitea_tools','youtrack_tools','git_workflow_tools',
-                  'agent_tools','diagnostics_tools')}
+                  'agent_tools','diagnostics_tools','zabbix_tools')}
         disk_fingerprint = source_fingerprint(SOURCE_ROOT)
         return {'host':'hbfplhmcpu01','service':service,
                 'loaded_source_sha256':LOADED_SOURCE_FINGERPRINT,
@@ -55,9 +55,11 @@ def register_tools(mcp:Any)->None:
                 'credentials_configured':{
                     'gitea':(HOME/'credentials/gitea.yml').is_file(),
                     'youtrack':(HOME/'credentials/youtrack.yml').is_file(),
-                    'ese_browser':(HOME/'credentials/ese-browser.json').is_file()},
+                    'ese_browser':(HOME/'credentials/ese-browser.json').is_file(),
+                    'zabbix':(HOME/'credentials/zabbix.yml').is_file()},
                 'helpers_present':{
                     'dsh_api':(HOME/'bin/dsh-remote').is_file(),
+                    'zabbix_watch':(HOME/'bin/zabbix-watch').is_file(),
                     'playwright':(HOME/'projects/esekretariat/ese-agent/tools/browser/node_modules').is_dir()},
                 'shell_enabled_in_service':True,
                 'notes':'Disk presence does not prove registered tools are active; refresh tools after service restart.'}

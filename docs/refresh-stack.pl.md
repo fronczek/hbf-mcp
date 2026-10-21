@@ -14,10 +14,11 @@
   openWorldHint=true.
 - Gate przeglądarkowy NIE jest read-only: zapisuje i może nadpisać raporty.
 - Ścieżki lokalnych repozytoriów i Playwright wskazują na ~/projects.
+- Instalator kopiuje moduł i helper Zabbixa oraz instaluje jego zależności systemowe.
 - Instalator restartuje działającą usługę; samo enable --now tego nie robiło.
 - mcp_health zwraca loaded_source_sha256, disk_source_sha256 i restart_required.
   Porównanie obejmuje podstawowe moduły Python, nie konfigurację, zależności,
-  definicje w ChatGPT ani dodatkowe moduły z innych PR.
+  definicje w ChatGPT. Obejmuje także zabbix_tools.py z połączonego PR #6.
 - test_client.py pokazuje adnotacje pobrane przez prawdziwy endpoint MCP.
 
 Te zmiany ograniczają fałszywe klasyfikacje. Nie gwarantują zatwierdzania każdej
@@ -45,6 +46,9 @@ backup_dir="/root/hbf-mcp-backup-$(date +%Y%m%d-%H%M%S)"
 install -d -m 0700 "$backup_dir"
 cp -a /opt/hbf-mcp "$backup_dir/runtime"
 cp -a /etc/systemd/system/hbf-mcp.service "$backup_dir/hbf-mcp.service"
+if [[ -f /home/gptagent/bin/zabbix-watch ]]; then
+  cp -a /home/gptagent/bin/zabbix-watch "$backup_dir/zabbix-watch"
+fi
 printf 'Backup: %s\n' "$backup_dir"
 
 bash ./install.sh
@@ -57,8 +61,8 @@ sudo -u gptagent /opt/hbf-mcp/.venv/bin/python /opt/hbf-mcp/test_client.py
 Instalator instaluje pakiety i zależności oraz jednostkę systemd; zachowuje treść
 istniejącego /etc/hbf-mcp.env. Nie nadaje sudo kontu gptagent.
 Przed instalacją porównaj jednostkę systemd, jeżeli masz lokalne zmiany.
-Osobne PR dotyczące tunelu i Zabbixa nie są częścią tej gałęzi.
-Jeśli wdrożyłeś je lokalnie, najpierw uzgodnij połączony zestaw źródeł;
+PR #6 (Zabbix) jest już połączony z tą gałęzią. PR #5 (tunel) pozostaje osobny.
+Jeśli wdrożyłeś lokalnie zmiany tunelu, najpierw uzgodnij połączony zestaw źródeł;
 nie zastępuj instalacji bez sprawdzenia różnic.
 
 Dla aktualizacji SAMYCH źródeł z już działającymi zależnościami i jednostką
@@ -66,9 +70,13 @@ można zamiast install.sh wykonać po powyższym backupie:
 
 ```bash
 for module in server.py gitea_tools.py youtrack_tools.py git_workflow_tools.py \
-              agent_tools.py diagnostics_tools.py test_client.py; do
+              agent_tools.py diagnostics_tools.py zabbix_tools.py test_client.py; do
   install -o gptagent -g gptagent -m 0644 "$module" "/opt/hbf-mcp/$module"
 done
+# Helper korzysta z systemowego Pythona, nie z /opt/hbf-mcp/.venv.
+apt-get install -y python3-yaml python3-requests
+install -d -o gptagent -g gptagent /home/gptagent/bin
+install -o gptagent -g gptagent -m 0755 bin/zabbix-watch /home/gptagent/bin/zabbix-watch
 systemctl restart hbf-mcp
 systemctl is-active --quiet hbf-mcp
 sudo -u gptagent /opt/hbf-mcp/.venv/bin/python /opt/hbf-mcp/test_client.py
@@ -121,13 +129,17 @@ test -d "$backup_dir/runtime/.venv"
 systemctl stop hbf-mcp
 cp -a "$backup_dir/runtime/." /opt/hbf-mcp/
 cp -a "$backup_dir/hbf-mcp.service" /etc/systemd/system/hbf-mcp.service
+if [[ -f "$backup_dir/zabbix-watch" ]]; then
+  cp -a "$backup_dir/zabbix-watch" /home/gptagent/bin/zabbix-watch
+fi
 systemctl daemon-reload
 systemctl start hbf-mcp
 systemctl is-active --quiet hbf-mcp
 ```
 
-Ta poprawka nie dodaje nowych modułów runtime, więc odtworzenie kopii przywraca
-jej poprzedni zestaw plików. Backup nie obejmuje zmian pakietów systemowych
+Względem master po PR #6 ta poprawka nie dodaje nowych modułów runtime, więc
+odtworzenie kopii przywraca jej poprzedni zestaw plików. Jeśli helper nie istniał
+przed wdrożeniem, pozostanie na dysku po rollbacku; sam nie uruchamia usługi. Backup nie obejmuje zmian pakietów systemowych
 wykonanych przez apt. Po rollbacku ponownie odśwież definicje w ChatGPT.
 
 ## Źródła

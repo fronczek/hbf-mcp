@@ -63,7 +63,7 @@ GIT_MUTATING_TOOLS = {"git_workflow_sync", "git_workflow_branch", "git_workflow_
                       "git_workflow_signed_commit", "git_workflow_push"}
 AGENT_READ_ONLY_TOOLS = {"deepseek_sessions"}
 AGENT_MUTATING_TOOLS = {"deepseek_flash_task", "ese_browser_gate"}
-READ_ONLY_TOOLS |= GIT_READ_ONLY_TOOLS | AGENT_READ_ONLY_TOOLS | {"mcp_health","mcp_api_health",
+READ_ONLY_TOOLS |= GIT_READ_ONLY_TOOLS | AGENT_READ_ONLY_TOOLS | {"mcp_health","mcp_api_health","zabbix_health",
                        "youtrack_search_issues","youtrack_issue_detail","youtrack_issue_comments",
                        "gitea_ci_summary"}
 MUTATING_TOOLS |= GIT_MUTATING_TOOLS | AGENT_MUTATING_TOOLS | {"youtrack_apply_state"}
@@ -651,7 +651,7 @@ def test_bounded_tools_have_closed_world_annotations():
                YOUTRACK_MUTATING_TOOLS |
                {"youtrack_search_issues", "youtrack_issue_detail",
                 "youtrack_issue_overview", "youtrack_issue_comments",
-                "youtrack_apply_state", "deepseek_sessions", "ese_browser_gate"})
+                "youtrack_apply_state", "deepseek_sessions", "ese_browser_gate", "zabbix_health"})
     for name in bounded:
         assert tools[name].annotations.open_world_hint is False, name
     # Arbitrary shell and a delegated coding agent retain their broader scope.
@@ -659,12 +659,13 @@ def test_bounded_tools_have_closed_world_annotations():
     assert tools["deepseek_flash_task"].annotations.open_world_hint is True
 
 
-def test_source_fingerprint_detects_changed_runtime(tmp_path):
+@pytest.mark.parametrize("changed_file", ["server.py", "zabbix_tools.py"])
+def test_source_fingerprint_detects_changed_runtime(tmp_path, changed_file):
     import diagnostics_tools as diagnostics
     for name in diagnostics.SOURCE_FILES:
         (tmp_path / name).write_text("# synthetic source\n")
     before = diagnostics.source_fingerprint(tmp_path)
-    (tmp_path / "server.py").write_text("# changed source\n")
+    (tmp_path / changed_file).write_text("# changed source\n")
     assert diagnostics.source_fingerprint(tmp_path) != before
 
 

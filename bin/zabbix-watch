@@ -1,0 +1,174 @@
+#!/usr/bin/python3
+"""Fixed, read-only Zabbix health report for the HBF MCP bridge.
+
+No caller-controlled URL, credentials, query language, host IDs or arbitrary API
+methods. Secrets are loaded locally and NEVER printed or included in errors.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import statistics
+import sys
+import time
+from pathlib import Path
+
+import requests
+import yaml
+
+CREDENTIALS = Path('/home/gptagent/credentials/zabbix.yml')
+MONITORED = ('hbfplhpved01', 'hbfplhpved02')
+SENSOR_KEYS = {
+    'cpu_c': 'hw.sensor.temp[coretemp-isa-0000,Package id 0]',
+    'nvme_c': 'hw.sensor.temp[nvme-pci-0100,Composite]',
+    'cpu_util_pct': 'system.cpu.util',
+}
+
+
+def stamp(utc: int) -> str:
+    return dt.datetime.fromtimestamp(int(utc), dt.timezone.utc).isoformat()
+
+
+def summarise_samples(rows: list[dict], *, thresholds_c: tuple[int, ...] = ()) -> dict:
+    readings = sorted((int(x['clock']), float(x['value'])) for x in rows)
+    if not readings:
+        return {'samples': 0, 'available': False}
+    values = sorted(v for _, v in readings)
+    count = len(values)
+    summary = {
+        'available': True,
+        'samples': count,
+        'first_utc': stamp(readings[0][0]),
+        'last_utc': stamp(readings[-1][0]),
+        'latest': round(readings[-1][1], 2),
+        'mean': round(statistics.mean(values), 2),
+        'median': round(statistics.median(values), 2),
+        'p95': round(values[int((count - 1) * .95)], 2),
+        'max': round(values[-1], 2),
+    }
+    if thresholds_c:
+        thresholds = {}
+        for limit in thresholds_c:
+            episodes = []
+            current = []
+            for t, v in readings:
+                if v >= limit:
+                    if current and t - current[-1][0] > 120:
+                        episodes.append(current)
+                        current = []
+                    current.append((t, v))
+                elif current:
+                    episodes.append(current)
+                    current = []
+            if current:
+                episodes.append(current)
+            episodes.sort(key=len, reverse=True)
+            thresholds[str(limit)] = {
+                'samples_at_or_above': sum(v >= limit for _, v in readings),
+                'episodes': len(episodes),
+                'longest_episode_minutes_approx': len(episodes[0]) if episodes else 0,
+                'longest_start_utc': stamp(episodes[0][0][0]) if episodes else None,
+                'last_episode_utc': stamp(max(e[-1][0] for e in episodes)) if episodes else None,
+            }
+        summary['thresholds_c'] = thresholds
+    return summary
+
+
+class Zabbix:
+    def __init__(self):
+        conf = yaml.safe_load(CREDENTIALS.read_text())
+        url = str(conf['zabbix_url']).rstrip('/')
+        if not url.startswith('https://'):
+            raise ValueError('Zabbix URL must use HTTPS')
+        self.url = url if url.endswith('/api_jsonrpc.php') else url + '/api_jsonrpc.php'
+        self.s = requests.Session()
+        self.s.trust_env = False  # do not forward API token through a proxy
+        self.s.headers.update({'Content-Type': 'application/json', 'Authorization': 'Bearer ' + str(conf['zabbix_token_value'])})
+        self.callid = 0
+
+    def call(self, method: str, params: dict):
+        self.callid += 1
+        try:
+            response = self.s.post(self.url, json={'jsonrpc': '2.0', 'method': method, 'params': params, 'id': self.callid}, headers={'Authorization': None} if method == 'apiinfo.version' else None, timeout=20, allow_redirects=False)
+            response.raise_for_status()
+            data = response.json()
+        except (requests.RequestException, ValueError):
+            raise RuntimeError('Zabbix API connection failed') from None
+        if 'error' in data:
+            raise RuntimeError('Zabbix API rejected read-only request for ' + method)
+        return data.get('result', [])
+
+
+def run(hours: int):
+    start = int(time.time()) - hours * 3600
+    now = int(time.time())
+    api = Zabbix()
+    hosts = api.call('host.get', {'filter': {'host': list(MONITORED)}, 'output': ['hostid','host','status']})
+    lookup = {h['host']: h for h in hosts}
+    result = {
+        'checked_utc': stamp(now), 'lookback_hours': hours,
+        'api_version': api.call('apiinfo.version', {}),
+        'hosts': {},
+        'alerts': {},
+    }
+    for host in MONITORED:
+        h = lookup.get(host)
+        if h is None:
+            result['hosts'][host] = {'found': False}
+            continue
+        hid = h['hostid']
+        items = api.call('item.get', {'hostids': [hid], 'filter': {'key_': list(SENSOR_KEYS.values())}, 'output':['itemid','key_','value_type','lastclock','lastvalue','status']})
+        item_lookup = {i['key_']: i for i in items if i.get('status') == '0'}
+        telemetry = {'found': True, 'enabled': h['status'] == '0'}
+        for label, key in SENSOR_KEYS.items():
+            item = item_lookup.get(key)
+            if item is None:
+                telemetry[label] = {'available': False, 'reason': 'No enabled item'}
+                continue
+            hist = api.call('history.get', {'history': int(item['value_type']), 'itemids': [item['itemid']], 'time_from':start,'time_till':now,'sortfield':'clock','sortorder':'ASC','limit': 12000})
+            telemetry[label] = summarise_samples(hist, thresholds_c=(70,80,90) if label=='cpu_c' else (65,75,80) if label=='nvme_c' else ())
+            if telemetry[label].get('available'):
+                telemetry[label]['last_sample_age_minutes'] = round((now-int(item['lastclock']))/60, 1)
+        result['hosts'][host] = telemetry
+    # Current unresolved problems only. Names/severities are returned, not secrets.
+    problems = api.call('problem.get', {'source':0,'object':0,'output':['eventid','name','severity','clock','acknowledged','objectid'], 'sortfield':'eventid','sortorder':'DESC','limit':600})
+    severity_names = {0:'not_classified',1:'information',2:'warning',3:'average',4:'high',5:'disaster'}
+    relevant = [x for x in problems if int(x['severity'])>=4 or any(word in x['name'].lower() for word in ('not available','unavailable','nodata','link down','unreachable','offline','no data','failed'))]
+    triggerids = list(dict.fromkeys(x['objectid'] for x in relevant))
+    trigger_hosts = {}
+    for i in range(0,len(triggerids),100):
+        matched = api.call('trigger.get',{'triggerids':triggerids[i:i+100], 'output':['triggerid'], 'selectHosts':['host']})
+        for t in matched:
+            trigger_hosts[t['triggerid']] = [h['host'] for h in t.get('hosts',[])]
+    def serialize(x):
+        clock = int(x['clock'])
+        return {'eventid': x['eventid'], 'name': x['name'][:240], 'severity': severity_names.get(int(x['severity']),str(x['severity'])), 'started_utc': stamp(clock), 'age_hours': round((now-clock)/3600,1), 'acknowledged': x.get('acknowledged')=='1', 'hosts':trigger_hosts.get(x['objectid'],[])}
+    highs = [x for x in relevant if int(x['severity'])>=4]
+    outages = [x for x in relevant if any(word in x['name'].lower() for word in ('not available','unavailable','nodata','link down','unreachable','offline','no data','failed'))]
+    result['alerts'] = {
+        'total_unresolved':len(problems),
+        'high_or_disaster_unresolved_count':len(highs),
+        'new_high_or_disaster': [serialize(x) for x in highs if int(x['clock'])>=start][:35],
+        'old_high_or_disaster': [serialize(x) for x in highs if int(x['clock'])<start][:25],
+        'availability_issues': [serialize(x) for x in outages][:30],
+    }
+    return result
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Read-only Zabbix health overview')
+    parser.add_argument('--hours', type=int, default=24)
+    args = parser.parse_args()
+    if not 1 <= args.hours <= 168:
+        parser.error('hours must be between 1 and 168')
+    try:
+        print(json.dumps(run(args.hours),ensure_ascii=False,separators=(',',':')))
+    except Exception:
+        # Never leak Authorization header, secret path, remote response, or URL.
+        print(json.dumps({'status':'error','reason':'Zabbix health check unavailable; inspect MCP-local logs'}))
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()
