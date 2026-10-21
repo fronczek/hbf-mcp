@@ -339,7 +339,8 @@ def oauth_settings() -> dict:
         "token_verifier": verifier,
         "auth": AuthSettings(issuer_url=AnyHttpUrl(issuer),
                              resource_server_url=AnyHttpUrl(audience),
-                             required_scopes=["mcp:admin"]),
+                             required_scopes=["mcp:admin"],
+                             validate_token_resource=True),
     }
 
 
