@@ -83,7 +83,7 @@ master stays a deliberate separately reviewed Git/GPG operation.
 **DSH (2 tools)**: `deepseek_sessions` and `deepseek_flash_task`. These invoke
 only the locally pinned `~/bin/dsh-remote` helper, which uses the authenticated
 DSH Harness **HTTPS API**. The second tool requires a specific `ESE-xxx` issue,
-owner-authorized task and budget (default USD 0.05, maximum USD 0.20 per task),
+owner-authorized task and budget (default USD 1.00, maximum USD 1.00 per task),
 refuses concurrent Flash sessions by default, and outputs a bounded result. No
 new SSH login or remote filesystem access. A timed-out request may have started;
 inspect the DSH session before retrying rather than dispatching twice.
@@ -125,3 +125,5 @@ The existing GitHub CI/fixture suites run without access to local GPT secrets.
 Some convenience tools require live local credentials and are validated using
 mocked offline tests; no DeepSeek Flash or live Playwright gate is run as part
 of the normal unit suite.
+
+Deployment and approval troubleshooting: [Polish runbook](refresh-stack.pl.md).

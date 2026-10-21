@@ -42,7 +42,7 @@ def health_report(lookback_hours: int = 24) -> dict[str, Any]:
 def register_tools(mcp: Any) -> None:
     readonly = ToolAnnotations(
         readOnlyHint=True, destructiveHint=False,
-        idempotentHint=True, openWorldHint=True,
+        idempotentHint=True, openWorldHint=False,
     )
 
     @mcp.tool(annotations=readonly)

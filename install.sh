@@ -15,6 +15,8 @@ apt-get install -y \
   python3 \
   python3-venv \
   python3-pip \
+  python3-yaml \
+  python3-requests \
   git \
   curl \
   jq \
@@ -46,9 +48,13 @@ install -o "${SERVICE_USER}" -g "${SERVICE_USER}" -m 0644 \
   "${SOURCE_DIR}/requirements.txt" \
   "${INSTALL_DIR}/requirements.txt"
 
-for module in gitea_tools.py youtrack_tools.py git_workflow_tools.py agent_tools.py diagnostics_tools.py; do
+for module in gitea_tools.py youtrack_tools.py git_workflow_tools.py agent_tools.py diagnostics_tools.py zabbix_tools.py; do
   install -o "${SERVICE_USER}" -g "${SERVICE_USER}" -m 0644 "${SOURCE_DIR}/${module}" "${INSTALL_DIR}/${module}"
 done
+
+install -d -o "${SERVICE_USER}" -g "${SERVICE_USER}" "/home/${SERVICE_USER}/bin"
+install -o "${SERVICE_USER}" -g "${SERVICE_USER}" -m 0755 \
+  "${SOURCE_DIR}/bin/zabbix-watch" "/home/${SERVICE_USER}/bin/zabbix-watch"
 
 if [[ ! -d "${INSTALL_DIR}/.venv" ]]; then
   python3 -m venv "${INSTALL_DIR}/.venv"
@@ -73,7 +79,10 @@ install -o root -g root -m 0644 \
   /etc/systemd/system/hbf-mcp.service
 
 systemctl daemon-reload
-systemctl enable --now hbf-mcp
+# enable --now does not restart an already running service.
+systemctl enable hbf-mcp
+systemctl restart hbf-mcp
+systemctl is-active --quiet hbf-mcp
 
 echo
 echo "Installed HBF MCP."

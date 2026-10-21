@@ -13,7 +13,7 @@ from typing import Any, Literal
 from mcp.types import ToolAnnotations
 
 HELPER=Path('/home/gptagent/bin/dsh-remote')
-BROWSER=Path('/home/gptagent/esekretariat/ese-agent/tools/browser')
+BROWSER=Path('/home/gptagent/projects/esekretariat/ese-agent/tools/browser')
 CONFIG=Path('/home/gptagent/credentials/ese-browser.json')
 ESE=re.compile(r'^ESE-[1-9][0-9]{0,6}$')
 
@@ -49,7 +49,7 @@ def _run(args:list[str], *, timeout:int=35, stdin:str|None=None, cwd:Path|None=N
 
 
 def register_tools(mcp:Any)->None:
-    read=ToolAnnotations(readOnlyHint=True,destructiveHint=False,idempotentHint=True,openWorldHint=True)
+    read=ToolAnnotations(readOnlyHint=True,destructiveHint=False,idempotentHint=True,openWorldHint=False)
     write=ToolAnnotations(readOnlyHint=False,destructiveHint=True,idempotentHint=False,openWorldHint=True)
 
     @mcp.tool(annotations=read)
@@ -96,10 +96,12 @@ def register_tools(mcp:Any)->None:
                 'result_excerpt':answer[-3000:],
                 'result_truncated':len(answer)>3000}
 
-    @mcp.tool(annotations=write)
+    browser_write=ToolAnnotations(readOnlyHint=False,destructiveHint=True,idempotentHint=False,openWorldHint=False)
+
+    @mcp.tool(annotations=browser_write)
     def ese_browser_gate(gate:Literal['smoke','admin-smoke'],
                          timeout_seconds:int=180)->dict:
-        """Run existing read-only Playwright ESE menu gate on MCP01; return brief result.
+        """Run the fixed ESE test menu gate; writes local reports, returns brief results.
 
         Browser target is restricted by ese-agent gate scripts to authorised TEST .org hosts.
         The gate can write local reports, and must be run only for authorised test systems.

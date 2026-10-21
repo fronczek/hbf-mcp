@@ -92,9 +92,9 @@ def _confirm_gpt_account() -> None:
 def register_tools(mcp: Any) -> None:
     """Attach narrowly scoped YouTrack methods to an existing MCP FastMCP app."""
 
-    read = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True)
-    write = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
-    state_write = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
+    read = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+    write = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
+    state_write = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False)
 
     @mcp.tool(annotations=read)
     def youtrack_search_issues(query: str = "", limit: int = 15, skip: int = 0) -> dict:
@@ -194,7 +194,7 @@ def register_tools(mcp: Any) -> None:
             raise RuntimeError("Posted comment author differs from GPT")
         return {"issue": issue_id, "comment_id": result.get("id"), "author": author}
 
-    @mcp.tool(annotations=write)
+    @mcp.tool(annotations=state_write)
     def youtrack_append_decision(issue_id: str, heading: str, body: str) -> dict:
         """Idempotently prepend a decision section to an ESE issue description."""
         route = _issue(issue_id)
