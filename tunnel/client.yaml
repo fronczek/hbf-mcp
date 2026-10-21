@@ -1,0 +1,17 @@
+# OpenAI Secure MCP Tunnel; tunnel id is read from CONTROL_PLANE_TUNNEL_ID.
+# No API keys or local identities are stored in this file.
+config_version: 1
+control_plane:
+  base_url: "https://api.openai.com"
+  api_key: "file:/etc/hbf-mcp-tunnel/runtime.key"
+health:
+  listen_addr: "127.0.0.1:18865"
+admin_ui:
+  open_browser: false
+log:
+  level: info
+  format: json
+mcp:
+  server_urls:
+    - channel: main
+      url: "http://127.0.0.1:8765/mcp"

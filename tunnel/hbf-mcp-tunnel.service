@@ -1,0 +1,33 @@
+[Unit]
+Description=OpenAI Secure MCP Tunnel for HBF MCP01
+Documentation=https://developers.openai.com/api/docs/guides/secure-mcp-tunnels
+Wants=network-online.target
+After=network-online.target hbf-mcp.service
+Requires=hbf-mcp.service
+
+[Service]
+Type=simple
+User=hbf-tunnel
+Group=hbf-tunnel
+EnvironmentFile=/etc/hbf-mcp-tunnel/tunnel.env
+ExecStartPre=/usr/bin/test -s /etc/hbf-mcp-tunnel/runtime.key
+ExecStart=/usr/local/bin/tunnel-client run --config /etc/hbf-mcp-tunnel/client.yaml
+Restart=on-failure
+RestartSec=10
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
