@@ -92,6 +92,20 @@ bash ./install.sh
 The same installer preserves existing configuration, credentials and operation state,
 backs up the previous installation, updates dependencies and restarts the service.
 
+## Service management
+
+On Debian/Ubuntu with systemd, run as root:
+
+```bash
+service hbf-mcp start
+service hbf-mcp stop
+service hbf-mcp restart
+service hbf-mcp status
+```
+
+These commands use the installed hbf-mcp.service unit. An explicit stop keeps
+the service stopped; Restart=on-failure only handles unexpected failures.
+
 ## Local test
 
 The repository includes a tiny MCP client.

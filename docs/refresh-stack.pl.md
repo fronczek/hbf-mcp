@@ -50,6 +50,20 @@ Po wdrożeniu: otwórz połączenie hbfplhmcpu01 w Plugins, wybierz Refresh
 i rozpocznij nową rozmowę. Odświeżenie dotyczy zmian nazw, opisów, schematów
 i adnotacji narzędzi — git pull ani restart systemd nie odświeża ich w ChatGPT.
 
+## Obsługa usługi
+
+Jako root:
+
+```bash
+service hbf-mcp start
+service hbf-mcp stop
+service hbf-mcp restart
+service hbf-mcp status
+```
+
+Polecenia korzystają z jednostki hbf-mcp.service w systemd. Ręczne stop
+pozostawia usługę zatrzymaną, mimo ustawienia Restart=on-failure.
+
 ## Opcjonalna diagnostyka
 
 ```bash
