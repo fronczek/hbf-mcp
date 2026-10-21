@@ -6,13 +6,14 @@ local helper owns credentials and returns bounded, sanitised JSON reports.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
 
 from mcp.types import ToolAnnotations
 
-HELPER = Path('/home/gptagent/bin/zabbix-watch')
+HELPER = Path(os.getenv('HBF_MCP_AGENT_HOME', '/home/gptagent')) / 'bin/zabbix-watch'
 
 
 def health_report(lookback_hours: int = 24) -> dict[str, Any]:

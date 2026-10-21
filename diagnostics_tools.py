@@ -3,13 +3,15 @@ from __future__ import annotations
 
 import os
 import hashlib
+import socket
 import subprocess
 from pathlib import Path
 from typing import Any
 from mcp.types import ToolAnnotations
 
-ROOT=Path('/opt/hbf-mcp')
-HOME=Path('/home/gptagent')
+ROOT=Path(__file__).resolve().parent
+HOME=Path(os.getenv('HBF_MCP_AGENT_HOME', '/home/gptagent'))
+SERVICE_NAME=os.getenv('HBF_MCP_SERVICE_NAME', 'hbf-mcp')
 
 SOURCE_ROOT = Path(__file__).resolve().parent
 SOURCE_FILES = ('server.py', 'gitea_tools.py', 'youtrack_tools.py',
@@ -38,7 +40,7 @@ def register_tools(mcp:Any)->None:
         """Inspect local MCP01 service and optional helper readiness (without secrets)."""
         from importlib.util import find_spec
         try:
-            proc=subprocess.run(['/usr/bin/systemctl','is-active','hbf-mcp.service'],
+            proc=subprocess.run(['/usr/bin/systemctl','is-active',SERVICE_NAME+'.service'],
                 capture_output=True,text=True,timeout=5)
             service=proc.stdout.strip() if proc.returncode==0 else 'not-active'
         except (OSError,subprocess.TimeoutExpired):
@@ -52,7 +54,7 @@ def register_tools(mcp:Any)->None:
         except OSError:
             disk_fingerprint = None
             source_readable = False
-        return {'host':'hbfplhmcpu01','service':service,
+        return {'host':socket.gethostname(),'service':service,'service_name':SERVICE_NAME,
                 'loaded_source_sha256':LOADED_SOURCE_FINGERPRINT,
                 'disk_source_sha256':disk_fingerprint,
                 'restart_required':disk_fingerprint != LOADED_SOURCE_FINGERPRINT,
@@ -67,7 +69,7 @@ def register_tools(mcp:Any)->None:
                 'helpers_present':{
                     'dsh_api':(HOME/'bin/dsh-remote').is_file(),
                     'zabbix_watch':(HOME/'bin/zabbix-watch').is_file(),
-                    'boiler_watch':(HOME/'bin/kuk-boiler-watch').is_file(),
+                    'boiler_watch':Path(os.getenv('HBF_MCP_BOILER_HELPER', str(HOME/'bin/kuk-boiler-watch'))).is_file(),
                     'playwright':(HOME/'projects/esekretariat/ese-agent/tools/browser/node_modules').is_dir()},
                 'shell_enabled_in_service':True,
                 'notes':'Disk presence does not prove registered tools are active; refresh tools after service restart.'}

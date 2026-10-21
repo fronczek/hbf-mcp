@@ -1,0 +1,230 @@
+#!/bin/bash
+set -euo pipefail
+
+# No arguments lists instances without changing the host.
+if (($# == 0)); then
+  printf '%-20s %-18s %-8s %-14s %s\n' INSTANCE USER PORT STATE DIRECTORY
+  found=0
+  for directory in /opt/hbf-mcp /opt/hbf-mcp-*; do
+    [[ -d "$directory" ]] || continue
+    found=1
+    name="${directory##*/}"
+    account="unknown"
+    if [[ -f "$directory/.service-user" ]]; then
+      IFS= read -r account < "$directory/.service-user"
+    else
+      account="$(systemctl show "$name.service" -p User --value 2>/dev/null || true)"
+      account="${account:-unknown}"
+    fi
+    config="$directory/.env"
+    [[ -f "$config" || "$name" != hbf-mcp ]] || config=/etc/hbf-mcp.env
+    port="$(sed -n 's/^HBF_MCP_PORT=//p' "$config" 2>/dev/null | tail -n 1 || true)"
+    state="$(systemctl is-active "$name" 2>/dev/null || true)"
+    printf '%-20s %-18s %-8s %-14s %s\n' "$name" "$account" "${port:-?}" "${state:-unknown}" "$directory"
+  done
+  [[ "$found" == 1 ]] || echo "No installed HBF MCP instances."
+  exit 0
+fi
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
+  echo "Usage: ./install [NAME USER [--port PORT]]"
+  exit 0
+fi
+[[ $# -ge 2 ]] || { echo "Usage: ./install NAME USER [--port PORT]" >&2; exit 2; }
+INSTANCE="$1"
+REQUESTED_USER="$2"
+REQUESTED_PORT=""
+shift 2
+if (($#)); then
+  [[ $# == 2 && "$1" == --port ]] || { echo "Expected --port PORT" >&2; exit 2; }
+  REQUESTED_PORT="$2"
+fi
+if [[ "${EUID}" -ne 0 ]]; then
+  echo "Run as root: ./install NAME USER" >&2
+  exit 1
+fi
+[[ "$INSTANCE" =~ ^[a-z][a-z0-9-]{0,20}$ ]] || {
+  echo "Invalid instance name" >&2; exit 2;
+}
+if [[ -n "$REQUESTED_PORT" ]]; then
+  [[ "$REQUESTED_PORT" =~ ^[0-9]{1,5}$ ]] &&
+    ((10#$REQUESTED_PORT >= 1024 && 10#$REQUESTED_PORT <= 65535)) || {
+      echo "Port must be 1024..65535" >&2; exit 2;
+    }
+fi
+
+SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SERVICE_NAME="hbf-mcp-$INSTANCE"
+INSTALL_DIR="/opt/${SERVICE_NAME}"
+ENV_FILE="${INSTALL_DIR}/.env"
+UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+SERVICE_USER="$REQUESTED_USER"
+if [[ -f "${INSTALL_DIR}/.service-user" ]]; then
+  IFS= read -r SAVED_USER < "${INSTALL_DIR}/.service-user"
+  if [[ -n "$REQUESTED_USER" && "$REQUESTED_USER" != "$SAVED_USER" ]]; then
+    echo "Changing the existing service account is not an upgrade" >&2; exit 2
+  fi
+  SERVICE_USER="$SAVED_USER"
+fi
+[[ "$SERVICE_USER" =~ ^[a-z_][a-z0-9_-]{0,30}$ && "$SERVICE_USER" != root ]] || {
+  echo "Invalid unprivileged service account" >&2; exit 2;
+}
+for existing in /opt/hbf-mcp*/.service-user; do
+  [[ -f "$existing" && "$existing" != "${INSTALL_DIR}/.service-user" ]] || continue
+  IFS= read -r OTHER_USER < "$existing"
+  [[ "$OTHER_USER" != "$SERVICE_USER" ]] || {
+    echo "Service account already belongs to another MCP instance" >&2; exit 2;
+  }
+done
+
+# Serialize upgrades and allocate ports consecutively from 8765.
+exec 9>/run/lock/hbf-mcp-install.lock
+flock -n 9 || { echo "Another HBF MCP installation is running" >&2; exit 1; }
+# Back up before changing packages, dependencies, sources or configuration.
+BACKUP_DIR=""
+if [[ -d "$INSTALL_DIR" || -f "$UNIT_FILE"  ]]; then
+  install -d -o root -g root -m 0700 "/var/backups/${SERVICE_NAME}"
+  BACKUP_DIR="$(mktemp -d "/var/backups/${SERVICE_NAME}/$(date +%Y%m%d-%H%M%S).XXXXXX")"
+  chmod 0700 "$BACKUP_DIR"
+  [[ ! -d "$INSTALL_DIR" ]] || cp -a "$INSTALL_DIR" "$BACKUP_DIR/runtime"
+  [[ ! -f "$UNIT_FILE" ]] || cp -a "$UNIT_FILE" "$BACKUP_DIR/hbf-mcp.service"
+  echo "Previous installation backup: $BACKUP_DIR"
+fi
+
+apt-get update
+apt-get install -y python3 python3-venv python3-pip python3-yaml python3-requests \
+  git curl jq openssh-client ca-certificates bash-completion
+if [[ ! -f "$ENV_FILE" || -n "$REQUESTED_PORT" ]]; then
+  REQUESTED_PORT="$(python3 - "$INSTALL_DIR" "$REQUESTED_PORT" <<'PY_PORT'
+from pathlib import Path
+import socket
+import sys
+
+target, requested = sys.argv[1:]
+def read_port(config):
+    if config.is_file():
+        for line in config.read_text().splitlines():
+            if line.startswith("HBF_MCP_PORT="):
+                value = line.partition("=")[2].strip().strip(chr(34) + chr(39))
+                if value.isdigit():
+                    return int(value)
+    return None
+
+current = read_port(Path(target) / ".env")
+used = {
+    read_port(config) for config in
+    list(Path("/opt").glob("hbf-mcp*/.env")) + [Path("/etc/hbf-mcp.env")]
+    if config != Path(target) / ".env"
+}
+for port in ([int(requested)] if requested else range(8765, 65536)):
+    if port in used:
+        continue
+    if requested and port == current:
+        print(port)
+        break
+    with socket.socket() as probe:
+        try:
+            probe.bind(("0.0.0.0", port))
+        except OSError:
+            continue
+    print(port)
+    break
+else:
+    sys.exit("No free MCP port; choose another --port")
+PY_PORT
+)"
+fi
+
+if ! id "$SERVICE_USER" >/dev/null 2>&1; then
+  useradd --create-home --shell /bin/bash "$SERVICE_USER"
+fi
+SERVICE_GROUP="$(id -gn "$SERVICE_USER")"
+AGENT_HOME="$(getent passwd "$SERVICE_USER" | cut -d: -f6)"
+[[ "$AGENT_HOME" =~ ^/[A-Za-z0-9_./-]+$ && "$AGENT_HOME" != / ]] || {
+  echo "Unsupported service account home path" >&2; exit 2;
+}
+if [[ -n "$BACKUP_DIR" ]]; then
+  for helper in zabbix-watch kuk-boiler-watch; do
+    [[ ! -f "$AGENT_HOME/bin/$helper" ]] ||
+      cp -a "$AGENT_HOME/bin/$helper" "$BACKUP_DIR/$helper"
+  done
+fi
+install -d -o "$SERVICE_USER" -g "$SERVICE_GROUP" "$INSTALL_DIR"
+if [[ ! -d "$INSTALL_DIR/.venv" ]]; then
+  python3 -m venv "$INSTALL_DIR/.venv"
+fi
+"$INSTALL_DIR/.venv/bin/pip" install -r "$SOURCE_DIR/requirements.txt"
+"$INSTALL_DIR/.venv/bin/python" -m pip check
+"$INSTALL_DIR/.venv/bin/python" - "$SOURCE_DIR" <<'PY'
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+for name in ("server.py", "test_client.py", "gitea_tools.py", "youtrack_tools.py",
+             "git_workflow_tools.py", "agent_tools.py", "diagnostics_tools.py",
+             "zabbix_tools.py", "bin/zabbix-watch", "bin/kuk-boiler-watch"):
+    compile((root / name).read_bytes(), name, "exec")
+print("Source syntax preflight passed")
+PY
+
+for module in server.py test_client.py gitea_tools.py youtrack_tools.py \
+              git_workflow_tools.py agent_tools.py diagnostics_tools.py zabbix_tools.py requirements.txt; do
+  install -o "$SERVICE_USER" -g "$SERVICE_GROUP" -m 0644 "$SOURCE_DIR/$module" "$INSTALL_DIR/$module"
+done
+install -d -o "$SERVICE_USER" -g "$SERVICE_GROUP" "$AGENT_HOME/bin"
+for helper in zabbix-watch kuk-boiler-watch; do
+  install -o "$SERVICE_USER" -g "$SERVICE_GROUP" -m 0755 "$SOURCE_DIR/bin/$helper" "$AGENT_HOME/bin/$helper"
+done
+chown -R "$SERVICE_USER:$SERVICE_GROUP" "$INSTALL_DIR"
+
+if [[ ! -f "$ENV_FILE" ]]; then
+  "$INSTALL_DIR/.venv/bin/python" - "$SOURCE_DIR/hbf-mcp.env.example" "$ENV_FILE" "$AGENT_HOME" "$SERVICE_NAME" <<'PY'
+from pathlib import Path
+import sys
+src, dest, home, name = sys.argv[1:]
+text = Path(src).read_text().replace("/home/gptagent", home)
+text = text.replace("HBF_MCP_NAME=HBF MCP - Artur", "HBF_MCP_NAME=" + name)
+text = text.replace("HBF_MCP_ALLOWED_LOG_SERVICES=hbf-mcp", "HBF_MCP_ALLOWED_LOG_SERVICES=" + name)
+Path(dest).write_text(text)
+PY
+fi
+if [[ -n "$REQUESTED_PORT" ]]; then
+  "$INSTALL_DIR/.venv/bin/python" - "$ENV_FILE" "$REQUESTED_PORT" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+lines = [line for line in path.read_text().splitlines() if not line.startswith("HBF_MCP_PORT=")]
+path.write_text("\n".join(lines + ["HBF_MCP_PORT=" + str(int(sys.argv[2]))]) + "\n")
+PY
+fi
+chown root:root "$ENV_FILE"
+chmod 0600 "$ENV_FILE"
+printf '%s\n' "$SERVICE_USER" > "$INSTALL_DIR/.service-user"
+chown root:root "$INSTALL_DIR/.service-user"
+chmod 0644 "$INSTALL_DIR/.service-user"
+
+"$INSTALL_DIR/.venv/bin/python" - "$SOURCE_DIR/systemd/hbf-mcp.service" "$UNIT_FILE" "$INSTALL_DIR" "$SERVICE_USER" "$AGENT_HOME" "$SERVICE_NAME" "$SERVICE_GROUP" <<'PY'
+from pathlib import Path
+import sys
+src, dest, root, user, home, name, group = sys.argv[1:]
+text = Path(src).read_text()
+for key, value in {"@INSTALL_DIR@": root, "@SERVICE_USER@": user, "@SERVICE_GROUP@": group,
+                   "@AGENT_HOME@": home, "@SERVICE_NAME@": name}.items():
+    text = text.replace(key, value)
+Path(dest).write_text(text)
+PY
+chown root:root "$UNIT_FILE"
+chmod 0644 "$UNIT_FILE"
+install -d -o root -g root -m 0755 /etc/bash_completion.d
+install -o root -g root -m 0644 "$SOURCE_DIR/completion/hbf-mcp" /etc/bash_completion.d/hbf-mcp
+
+systemctl daemon-reload
+systemctl enable "$SERVICE_NAME"
+systemctl restart "$SERVICE_NAME"
+systemctl is-active --quiet "$SERVICE_NAME"
+echo "Installed/upgraded $SERVICE_NAME"
+echo "Configuration: $ENV_FILE"
+echo "Port: $(sed -n 's/^HBF_MCP_PORT=//p' "$ENV_FILE" | tail -n 1)"
+echo "Account: $SERVICE_USER ($AGENT_HOME)"
+[[ -z "$BACKUP_DIR" ]] || echo "Previous installation backup: $BACKUP_DIR"
+echo "Service: service $SERVICE_NAME {start|stop|restart|status}"
+echo "For completion in this existing shell: source /etc/bash_completion.d/hbf-mcp"

@@ -1,21 +1,21 @@
 [Unit]
-Description=HBF MCP bridge
+Description=HBF MCP bridge (@SERVICE_NAME@)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=gptagent
-Group=gptagent
-WorkingDirectory=/opt/hbf-mcp
-EnvironmentFile=-/etc/hbf-mcp.env
-ExecStart=/opt/hbf-mcp/.venv/bin/python /opt/hbf-mcp/server.py
+User=@SERVICE_USER@
+Group=@SERVICE_GROUP@
+WorkingDirectory=@INSTALL_DIR@
+Environment=HBF_MCP_AGENT_HOME=@AGENT_HOME@
+Environment=HBF_MCP_SERVICE_NAME=@SERVICE_NAME@
+EnvironmentFile=@INSTALL_DIR@/.env
+ExecStart=@INSTALL_DIR@/.venv/bin/python @INSTALL_DIR@/server.py
 Restart=on-failure
 RestartSec=2
 TimeoutStopSec=15
 KillMode=mixed
-# The service account is unprivileged and the server never escalates.
-# NoNewPrivileges stays at its secure default (yes).
 NoNewPrivileges=yes
 
 [Install]

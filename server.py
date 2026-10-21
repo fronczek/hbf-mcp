@@ -84,7 +84,7 @@ class Config:
 
 def load_config() -> Config:
     default_cwd = Path(
-        os.path.realpath(os.path.expanduser(os.getenv("HBF_MCP_DEFAULT_CWD", "/home/gptagent")))
+        os.path.realpath(os.path.expanduser(os.getenv("HBF_MCP_DEFAULT_CWD", os.getenv("HBF_MCP_AGENT_HOME", "/home/gptagent"))))
     )
     read_roots = _split_paths(
         os.getenv("HBF_MCP_READ_ROOTS", str(default_cwd))
@@ -101,7 +101,7 @@ def load_config() -> Config:
         secret_read_allowlist=_split_paths(os.getenv("HBF_MCP_SECRET_READ_ALLOWLIST", "")),
         allowed_log_services=tuple(
             item.strip()
-            for item in os.getenv("HBF_MCP_ALLOWED_LOG_SERVICES", "hbf-mcp").split(",")
+            for item in os.getenv("HBF_MCP_ALLOWED_LOG_SERVICES", os.getenv("HBF_MCP_SERVICE_NAME", "hbf-mcp")).split(",")
             if item.strip()
         ),
         log_files=_split_log_files(os.getenv("HBF_MCP_LOG_FILES", "")),

@@ -1,3 +1,7 @@
+> Historyczny przegląd PR #8. Aktualny interfejs wieloinstancyjny to
+> ./install (lista) oraz ./install NAME USER (instalacja/upgrade).
+> Aktualna instrukcja: [refresh-stack.pl.md](refresh-stack.pl.md).
+
 # Przegląd przed wdrożeniem — 2026-10-21
 
 Baza: master 3041bfa po scaleniu PR #6 i #7. PR #5 zamknięty.

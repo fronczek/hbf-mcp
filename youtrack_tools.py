@@ -6,6 +6,7 @@ Credentials remain on hbfplhmcpu01 and are never returned.
 from __future__ import annotations
 
 import json
+import os
 import re
 import urllib.error
 import urllib.parse
@@ -15,7 +16,7 @@ from typing import Any
 
 from mcp.types import ToolAnnotations
 
-CREDENTIALS = Path("/home/gptagent/credentials/youtrack.yml")
+CREDENTIALS = Path(os.getenv("HBF_MCP_AGENT_HOME", "/home/gptagent")) / "credentials/youtrack.yml"
 ISSUE_ID = re.compile(r"^ESE-[1-9][0-9]{0,7}$")
 
 

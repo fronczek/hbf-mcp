@@ -12,9 +12,10 @@ from pathlib import Path
 from typing import Any, Literal
 from mcp.types import ToolAnnotations
 
-HELPER=Path('/home/gptagent/bin/dsh-remote')
-BROWSER=Path('/home/gptagent/projects/esekretariat/ese-agent/tools/browser')
-CONFIG=Path('/home/gptagent/credentials/ese-browser.json')
+HOME=Path(os.getenv('HBF_MCP_AGENT_HOME', '/home/gptagent'))
+HELPER=HOME/'bin/dsh-remote'
+BROWSER=HOME/'projects/esekretariat/ese-agent/tools/browser'
+CONFIG=HOME/'credentials/ese-browser.json'
 ESE=re.compile(r'^ESE-[1-9][0-9]{0,6}$')
 
 
