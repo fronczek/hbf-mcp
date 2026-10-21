@@ -73,7 +73,10 @@ install -o root -g root -m 0644 \
   /etc/systemd/system/hbf-mcp.service
 
 systemctl daemon-reload
-systemctl enable --now hbf-mcp
+# enable --now does not restart an already running service.
+systemctl enable hbf-mcp
+systemctl restart hbf-mcp
+systemctl is-active --quiet hbf-mcp
 
 echo
 echo "Installed HBF MCP."

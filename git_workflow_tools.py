@@ -11,10 +11,10 @@ from mcp.types import ToolAnnotations
 HOME = Path('/home/gptagent')
 REPOSITORIES = {
     'hbf-mcp': HOME/'projects/hbf-mcp-upstream-review',
-    'ese-agent': HOME/'esekretariat/ese-agent',
+    'ese-agent': HOME/'projects/esekretariat/ese-agent',
     'hbf-gpt-gitea': HOME/'projects/hbf-gpt-gitea',
-    'hbf-gpt-mailer': HOME/'repos/hbf-gpt-mailer',
-    'hbf-azure-ocr': HOME/'repos/hbf-azure-ocr',
+    'hbf-gpt-mailer': HOME/'projects/hbf-gpt-mailer',
+    'hbf-azure-ocr': HOME/'projects/hbf-azure-ocr',
 }
 SIGNER = 'F4B21C66B3C84DBE114CD6FE764C5FCF43B57DBA'
 EMAIL = 'artur.fronczek+gitea_gpt@gmail.com'
@@ -92,7 +92,9 @@ def _clean(repo: str) -> None:
 
 def register_tools(mcp: Any) -> None:
     read = ToolAnnotations(readOnlyHint=True,destructiveHint=False,idempotentHint=True,openWorldHint=False)
-    write = ToolAnnotations(readOnlyHint=False,destructiveHint=True,idempotentHint=False,openWorldHint=True)
+    write = ToolAnnotations(readOnlyHint=False,destructiveHint=True,idempotentHint=False,openWorldHint=False)
+
+    additive = ToolAnnotations(readOnlyHint=False,destructiveHint=False,idempotentHint=False,openWorldHint=False)
 
     @mcp.tool(annotations=read)
     def git_workflow_status(repo: str) -> dict:
@@ -121,7 +123,7 @@ def register_tools(mcp: Any) -> None:
         return {'repo':repo,'branch':branch,'before':before[:12],
                 'after':_git(repo,'rev-parse','HEAD')[:12]}
 
-    @mcp.tool(annotations=write)
+    @mcp.tool(annotations=additive)
     def git_workflow_branch(repo: str, name: str, expected_head: str) -> dict:
         """Create a topic branch at verified current HEAD in a clean local checkout."""
         _clean(repo); _branch_name(name)
@@ -151,7 +153,7 @@ def register_tools(mcp: Any) -> None:
         return {'repo':repo,'staged_count':len([x for x in staged if x]),
                 'staged_names':[x for x in staged if x][:30]}
 
-    @mcp.tool(annotations=write)
+    @mcp.tool(annotations=additive)
     def git_workflow_signed_commit(repo: str, message: str, expected_head: str) -> dict:
         """Sign staged content with GPT GPG key and verify signature; refuses stale HEAD."""
         if not 8 <= len(message) <= 160 or '\n' in message:

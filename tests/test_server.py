@@ -159,7 +159,8 @@ def test_mutating_tools_have_truthful_destructive_and_idempotency_hints():
     tools = list_tools()
     for name in MUTATING_TOOLS:
         annotations = tools[name].annotations
-        nondestructive = GITEA_MUTATING_TOOLS | {"youtrack_add_comment", "youtrack_append_decision"}
+        nondestructive = GITEA_MUTATING_TOOLS | {"youtrack_add_comment",
+                                                         "git_workflow_branch", "git_workflow_signed_commit"}
         assert annotations.destructive_hint is (name not in nondestructive), name
         assert annotations.idempotent_hint is (name in GITEA_MUTATING_TOOLS), name
 
@@ -641,3 +642,39 @@ def test_kuk_boiler_watch_accepts_no_arguments():
 def test_kuk_boiler_watch_fails_cleanly_without_a_helper(sandbox):
     with pytest.raises(RuntimeError):
         server.kuk_boiler_watch()
+
+
+def test_bounded_tools_have_closed_world_annotations():
+    tools = list_tools()
+    bounded = (GITEA_READ_ONLY_TOOLS | GITEA_MUTATING_TOOLS |
+               GIT_READ_ONLY_TOOLS | GIT_MUTATING_TOOLS |
+               YOUTRACK_MUTATING_TOOLS |
+               {"youtrack_search_issues", "youtrack_issue_detail",
+                "youtrack_issue_overview", "youtrack_issue_comments",
+                "youtrack_apply_state", "deepseek_sessions", "ese_browser_gate"})
+    for name in bounded:
+        assert tools[name].annotations.open_world_hint is False, name
+    # Arbitrary shell and a delegated coding agent retain their broader scope.
+    assert tools["shell"].annotations.open_world_hint is True
+    assert tools["deepseek_flash_task"].annotations.open_world_hint is True
+
+
+def test_source_fingerprint_detects_changed_runtime(tmp_path):
+    import diagnostics_tools as diagnostics
+    for name in diagnostics.SOURCE_FILES:
+        (tmp_path / name).write_text("# synthetic source\n")
+    before = diagnostics.source_fingerprint(tmp_path)
+    (tmp_path / "server.py").write_text("# changed source\n")
+    assert diagnostics.source_fingerprint(tmp_path) != before
+
+
+def test_health_reports_restart_after_source_change(monkeypatch):
+    import diagnostics_tools as diagnostics
+    monkeypatch.setattr(diagnostics, "LOADED_SOURCE_FINGERPRINT", "previous-build")
+    from mcp.server import MCPServer
+    instance = MCPServer("health-test")
+    diagnostics.register_tools(instance)
+    result = instance._tool_manager._tools["mcp_health"].fn()
+    assert result["restart_required"] is True
+    assert result["loaded_source_sha256"] == "previous-build"
+    assert len(result["disk_source_sha256"]) == 64

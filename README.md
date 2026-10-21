@@ -195,3 +195,8 @@ sudo systemctl restart hbf-mcp
 The server uses the official Python MCP SDK v2 and Streamable HTTP.
 
 The service is configured as stateless HTTP with JSON responses because the current toolset does not require server-initiated callbacks.
+
+## Operations runbooks
+
+- [Odświeżenie stacku i diagnostyka zatwierdzeń (PL)](docs/refresh-stack.pl.md)
+- [Ocena oficjalnego gitea-mcp i konfiguracja pilota (PL)](docs/gitea-mcp-evaluation.pl.md)

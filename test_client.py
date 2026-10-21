@@ -19,7 +19,8 @@ async def main() -> None:
         result = await client.list_tools()
         print("Tools:")
         for tool in result.tools:
-            print(f"  - {tool.name}")
+            annotations = tool.annotations.model_dump(by_alias=True) if tool.annotations else {}
+            print(f"  - {tool.name}: {annotations}")
 
         print()
         info = await client.call_tool("info", {})

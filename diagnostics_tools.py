@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import hashlib
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,24 @@ from mcp.types import ToolAnnotations
 
 ROOT=Path('/opt/hbf-mcp')
 HOME=Path('/home/gptagent')
+
+SOURCE_ROOT = Path(__file__).resolve().parent
+SOURCE_FILES = ('server.py', 'gitea_tools.py', 'youtrack_tools.py',
+                'git_workflow_tools.py', 'agent_tools.py', 'diagnostics_tools.py')
+
+
+def source_fingerprint(root: Path) -> str:
+    """Hash only public runtime source; never configuration or credentials."""
+    digest = hashlib.sha256()
+    for name in SOURCE_FILES:
+        digest.update(name.encode())
+        digest.update((root / name).read_bytes())
+    return digest.hexdigest()
+
+
+# Snapshot at import, not at each health call: detect a deployment without restart.
+LOADED_SOURCE_FINGERPRINT = source_fingerprint(SOURCE_ROOT)
+
 
 
 def register_tools(mcp:Any)->None:
@@ -27,7 +46,11 @@ def register_tools(mcp:Any)->None:
         modules={name:(ROOT/(name+'.py')).is_file() for name in
                  ('gitea_tools','youtrack_tools','git_workflow_tools',
                   'agent_tools','diagnostics_tools')}
+        disk_fingerprint = source_fingerprint(SOURCE_ROOT)
         return {'host':'hbfplhmcpu01','service':service,
+                'loaded_source_sha256':LOADED_SOURCE_FINGERPRINT,
+                'disk_source_sha256':disk_fingerprint,
+                'restart_required':disk_fingerprint != LOADED_SOURCE_FINGERPRINT,
                 'modules_on_disk':modules,
                 'credentials_configured':{
                     'gitea':(HOME/'credentials/gitea.yml').is_file(),
@@ -35,7 +58,7 @@ def register_tools(mcp:Any)->None:
                     'ese_browser':(HOME/'credentials/ese-browser.json').is_file()},
                 'helpers_present':{
                     'dsh_api':(HOME/'bin/dsh-remote').is_file(),
-                    'playwright':(HOME/'esekretariat/ese-agent/tools/browser/node_modules').is_dir()},
+                    'playwright':(HOME/'projects/esekretariat/ese-agent/tools/browser/node_modules').is_dir()},
                 'shell_enabled_in_service':True,
                 'notes':'Disk presence does not prove registered tools are active; refresh tools after service restart.'}
 
