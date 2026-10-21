@@ -36,6 +36,27 @@ fi
 
 install -d -o "${SERVICE_USER}" -g "${SERVICE_USER}" "${INSTALL_DIR}"
 
+# Resolve and verify dependencies before replacing the running service's source.
+if [[ ! -d "${INSTALL_DIR}/.venv" ]]; then
+  python3 -m venv "${INSTALL_DIR}/.venv"
+fi
+
+"${INSTALL_DIR}/.venv/bin/pip" install -r "${SOURCE_DIR}/requirements.txt"
+
+"${INSTALL_DIR}/.venv/bin/python" -m pip check
+"${INSTALL_DIR}/.venv/bin/python" - "${SOURCE_DIR}" <<'PY'
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+for name in ("server.py", "test_client.py", "gitea_tools.py", "youtrack_tools.py",
+             "git_workflow_tools.py", "agent_tools.py", "diagnostics_tools.py",
+             "zabbix_tools.py", "bin/zabbix-watch"):
+    path = root / name
+    compile(path.read_bytes(), name, "exec")
+print("Source syntax preflight passed")
+PY
+
 install -o "${SERVICE_USER}" -g "${SERVICE_USER}" -m 0755 \
   "${SOURCE_DIR}/server.py" \
   "${INSTALL_DIR}/server.py"
@@ -55,13 +76,6 @@ done
 install -d -o "${SERVICE_USER}" -g "${SERVICE_USER}" "/home/${SERVICE_USER}/bin"
 install -o "${SERVICE_USER}" -g "${SERVICE_USER}" -m 0755 \
   "${SOURCE_DIR}/bin/zabbix-watch" "/home/${SERVICE_USER}/bin/zabbix-watch"
-
-if [[ ! -d "${INSTALL_DIR}/.venv" ]]; then
-  python3 -m venv "${INSTALL_DIR}/.venv"
-fi
-
-"${INSTALL_DIR}/.venv/bin/pip" install --upgrade pip
-"${INSTALL_DIR}/.venv/bin/pip" install -r "${INSTALL_DIR}/requirements.txt"
 
 chown -R "${SERVICE_USER}:${SERVICE_USER}" "${INSTALL_DIR}"
 

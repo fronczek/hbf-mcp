@@ -198,6 +198,8 @@ The service is configured as stateless HTTP with JSON responses because the curr
 
 ## Operations runbooks
 
+- [Przegląd przed wdrożeniem i DEV/publikacja (PL)](docs/preinstall-review.pl.md)
+
 - [Odświeżenie stacku i diagnostyka zatwierdzeń (PL)](docs/refresh-stack.pl.md)
 - [Ocena oficjalnego gitea-mcp i konfiguracja pilota (PL)](docs/gitea-mcp-evaluation.pl.md)
 

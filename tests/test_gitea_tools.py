@@ -59,6 +59,27 @@ class MutationTests(unittest.TestCase):
         self.body={"body":"test"}
         self.key="fe8d8c16-6aa7-42f3-80e9-e10bdd72ae7a"
 
+    def test_status_does_not_create_missing_database_or_parent(self):
+        self.assertFalse(g.DB_FILE.parent.exists())
+        self.assertEqual(g._operation_status(self.repo, self.key), {"status": "not_found"})
+        self.assertFalse(g.DB_FILE.parent.exists())
+
+    def test_status_uses_readonly_database_connection(self):
+        with patch.object(g, "_gpt_account"), patch.object(g, "_api", return_value={"id": 123}):
+            g._mutation(self.repo, self.key, "POST", self.path, self.body)
+        original_connect = g.sqlite3.connect
+        with patch.object(g.sqlite3, "connect", wraps=original_connect) as connect:
+            result = g._operation_status(self.repo, self.key)
+        self.assertEqual(result["status"], "done")
+        self.assertTrue(connect.call_args.kwargs["uri"])
+        self.assertTrue(connect.call_args.args[0].endswith("?mode=ro"))
+
+    def test_corrupt_database_returns_error_without_authorizing_retry(self):
+        g.DB_FILE.parent.mkdir()
+        g.DB_FILE.write_bytes(b"not a database")
+        with self.assertRaisesRegex(RuntimeError, "do not repeat"):
+            g._operation_status(self.repo, self.key)
+
     def test_durable_idempotency_and_reuse(self):
         with patch.object(g,"_gpt_account"),patch.object(g,"_api",return_value={"id":123}) as api:
             one=g._mutation(self.repo,self.key,"POST",self.path,self.body)

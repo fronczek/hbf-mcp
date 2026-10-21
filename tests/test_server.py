@@ -679,3 +679,19 @@ def test_health_reports_restart_after_source_change(monkeypatch):
     assert result["restart_required"] is True
     assert result["loaded_source_sha256"] == "previous-build"
     assert len(result["disk_source_sha256"]) == 64
+
+
+def test_health_survives_missing_runtime_source(monkeypatch):
+    import diagnostics_tools as diagnostics
+    from mcp.server import MCPServer
+
+    def missing(_root):
+        raise FileNotFoundError("source unavailable")
+    monkeypatch.setattr(diagnostics, "source_fingerprint", missing)
+    instance = MCPServer("health-missing-source")
+    diagnostics.register_tools(instance)
+    result = instance._tool_manager._tools["mcp_health"].fn()
+    assert result["runtime_sources_readable"] is False
+    assert result["restart_required"] is True
+    assert result["disk_source_sha256"] is None
+    assert result["loaded_source_sha256"] == diagnostics.LOADED_SOURCE_FINGERPRINT

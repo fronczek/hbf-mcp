@@ -30,16 +30,16 @@ Wykonaj jako root w krótkim oknie bez aktywnego zadania MCP/DSH.
 Restart może przerwać aktywne wywołanie. Nie powtarzaj niepewnego zapisu
 ani zadania DSH bez sprawdzenia jego wyniku.
 
-Poniższa komenda pobiera gałąź tej poprawki. Przed uruchomieniem porównaj HEAD
-z commitem widocznym w PR. Po zmergowaniu można zamiast nazwy gałęzi użyć master.
+Poniższe polecenia wykonaj po scaleniu poprawek przeglądu przed wdrożeniem.
+Pobierają aktualny master. Przed uruchomieniem porównaj HEAD z zatwierdzonym commitem.
 Jeśli katalog docelowy już istnieje, zatrzymaj się i sprawdź jego stan; nie kasuj go.
 
 ```bash
 set -euo pipefail
 
-git clone --branch fix/mcp-approval-classification-20261021 \
-  https://github.com/fronczek/hbf-mcp.git /root/hbf-mcp-approval-update
-cd /root/hbf-mcp-approval-update
+git clone --branch master \
+  https://github.com/fronczek/hbf-mcp.git /root/hbf-mcp-deploy
+cd /root/hbf-mcp-deploy
 git log -1 --oneline
 
 backup_dir="/root/hbf-mcp-backup-$(date +%Y%m%d-%H%M%S)"
@@ -61,7 +61,7 @@ sudo -u gptagent /opt/hbf-mcp/.venv/bin/python /opt/hbf-mcp/test_client.py
 Instalator instaluje pakiety i zależności oraz jednostkę systemd; zachowuje treść
 istniejącego /etc/hbf-mcp.env. Nie nadaje sudo kontu gptagent.
 Przed instalacją porównaj jednostkę systemd, jeżeli masz lokalne zmiany.
-PR #6 (Zabbix) jest już połączony z tą gałęzią. PR #5 (tunel) pozostaje osobny.
+PR #6 (Zabbix) i #7 (adnotacje/diagnostyka) są scalone. PR #5 (tunel) zamknięto bez scalenia.
 Jeśli wdrożyłeś lokalnie zmiany tunelu, najpierw uzgodnij połączony zestaw źródeł;
 nie zastępuj instalacji bez sprawdzenia różnic.
 
@@ -148,3 +148,9 @@ wykonanych przez apt. Po rollbacku ponownie odśwież definicje w ChatGPT.
 - https://developers.openai.com/plugins/plugin-guidelines
 - https://learn.chatgpt.com/docs/sandboxing/auto-review
 - https://learn.chatgpt.com/docs/agent-approvals-security
+
+## DEV i publikacja
+
+Zobacz [przegląd przed wdrożeniem](preinstall-review.pl.md): publikacja prywatna
+do workspace i odświeżenie narzędzi są osobnymi operacjami. Publikacja nie daje
+gwarancji usunięcia odmów automatycznego zatwierdzania.
