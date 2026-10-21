@@ -766,16 +766,11 @@ def kuk_boiler_watch() -> dict[str, Any]:
     except OSError as exc:
         raise RuntimeError(f"boiler helper could not be started: {exc}")
     if proc.returncode != 0:
-        raise RuntimeError(
-            truncate(proc.stderr.strip() or proc.stdout.strip() or
-                     f"boiler helper failed: {proc.returncode}")
-        )
+        raise RuntimeError(f"boiler helper failed (exit {proc.returncode}); inspect locally")
     try:
         result = json.loads(proc.stdout)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(
-            "boiler helper returned invalid JSON: " + truncate(proc.stdout, 4096)
-        ) from exc
+    except json.JSONDecodeError:
+        raise RuntimeError("boiler helper returned invalid JSON") from None
     if not isinstance(result, dict):
         raise RuntimeError("boiler helper returned a non-object JSON result")
     return result

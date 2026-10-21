@@ -695,3 +695,15 @@ def test_health_survives_missing_runtime_source(monkeypatch):
     assert result["restart_required"] is True
     assert result["disk_source_sha256"] is None
     assert result["loaded_source_sha256"] == diagnostics.LOADED_SOURCE_FINGERPRINT
+
+
+@pytest.mark.parametrize("returncode,stdout,stderr", [
+    (1, "synthetic-private-output", "synthetic-private-error"),
+    (0, "synthetic-private-output", ""),
+])
+def test_boiler_failure_does_not_return_raw_helper_output(monkeypatch, returncode, stdout, stderr):
+    response = subprocess.CompletedProcess([], returncode, stdout, stderr)
+    monkeypatch.setattr(server, "_run_readonly", lambda *args, **kwargs: response)
+    with pytest.raises(RuntimeError) as error:
+        server.kuk_boiler_watch()
+    assert "synthetic-private" not in str(error.value)

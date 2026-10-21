@@ -12,7 +12,8 @@ bezpieczeństwa ani testem każdej integracji zewnętrznej.
    i kompilację składni wszystkich modułów/helpera, a potem kopiuje kod.
    To ogranicza ryzyko pozostawienia częściowo podmienionych źródeł.
    Nie jest to wdrożenie atomowe: apt i pip mogą zmienić zależności przed błędem.
-   Kopia /opt/hbf-mcp i okno serwisowe nadal są potrzebne.
+   Instalator sam tworzy prywatny backup przed zmianami, w /var/backups/hbf-mcp.
+   Upgrade to git pull --ff-only i bash ./install.sh; konfiguracja i dane pozostają.
 2. requirements.txt dopuszczał dowolne mcp 2.x.
    Przypięto mcp[cli]==2.3.0, czyli wersję obecną na MCP01 i sprawdzoną testami.
    Nie jest to pełny lock zależności przechodnich.
@@ -75,12 +76,16 @@ Nie restartuj transportu Caddy tylko z powodu zmiany kodu Python.
 
 ## Weryfikacja
 
-- 110 testów + 25 podtestów PASS, w tym rzeczywisty lokalny MCP przez HTTP
+- 113 testów + 25 podtestów PASS, w tym rzeczywisty lokalny MCP przez HTTP
   i uruchomienie test_client.py jako osobnego procesu.
 - pip check: brak konfliktów w używanym środowisku.
 - bash -n install.sh i git diff --check: PASS.
 - Osobno wykonany preflight z instalatora: poprawne źródła akceptowane,
   źródło z celowym SyntaxError odrzucane.
+- Test instalatora w katalogu tymczasowym wykonuje dwa kolejne wdrożenia,
+  drugie ze zmienionym kodem. Sprawdza backupy, zachowanie konfiguracji i danych
+  oraz restart. apt/pip, uprawnienia roota i systemd są w tym teście zastąpione
+  atrapami — nie jest to rzeczywista instalacja pakietów.
 - Działająca usługa MCP01 nie była podmieniana ani restartowana.
 - Nie wykonywano rzeczywistych zapisów Gitea/YouTrack, zadań DSH ani zmiany
   ustawień wtyczki. Testy tych zapisów są offline.
@@ -92,3 +97,8 @@ Sprawdzone 2026-10-21:
 - https://learn.chatgpt.com/docs/build-plugins
 - https://developers.openai.com/plugins/deploy/submission
 - https://learn.chatgpt.com/docs/sandboxing/auto-review
+
+Uproszczono instalację do clone + bash ./install.sh, a aktualizację do
+git pull --ff-only + bash ./install.sh. Oba helpery (Zabbix i bojler) są
+wersjonowane, instalowane i kopiowane do automatycznego backupu.
+Błędy helpera bojlera zwracane przez MCP nie ujawniają surowego stdout/stderr.

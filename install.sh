@@ -10,6 +10,30 @@ SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="/opt/hbf-mcp"
 SERVICE_USER="gptagent"
 
+# Keep the previous runtime (including its venv) before changing dependencies.
+# Each run gets a private, unique backup; existing backups are never removed.
+BACKUP_DIR=""
+if [[ -d "${INSTALL_DIR}" || -f /etc/systemd/system/hbf-mcp.service || -f /etc/hbf-mcp.env ]]; then
+  install -d -o root -g root -m 0700 /var/backups/hbf-mcp
+  BACKUP_DIR="$(mktemp -d /var/backups/hbf-mcp/"$(date +%Y%m%d-%H%M%S)".XXXXXX)"
+  chmod 0700 "${BACKUP_DIR}"
+  if [[ -d "${INSTALL_DIR}" ]]; then
+    cp -a "${INSTALL_DIR}" "${BACKUP_DIR}/runtime"
+  fi
+  if [[ -f /etc/systemd/system/hbf-mcp.service ]]; then
+    cp -a /etc/systemd/system/hbf-mcp.service "${BACKUP_DIR}/hbf-mcp.service"
+  fi
+  if [[ -f /etc/hbf-mcp.env ]]; then
+    cp -a /etc/hbf-mcp.env "${BACKUP_DIR}/hbf-mcp.env"
+  fi
+  for helper in zabbix-watch kuk-boiler-watch; do
+    if [[ -f "/home/${SERVICE_USER}/bin/${helper}" ]]; then
+      cp -a "/home/${SERVICE_USER}/bin/${helper}" "${BACKUP_DIR}/${helper}"
+    fi
+  done
+  echo "Previous installation backup: ${BACKUP_DIR}"
+fi
+
 apt-get update
 apt-get install -y \
   python3 \
@@ -51,7 +75,7 @@ import sys
 root = pathlib.Path(sys.argv[1])
 for name in ("server.py", "test_client.py", "gitea_tools.py", "youtrack_tools.py",
              "git_workflow_tools.py", "agent_tools.py", "diagnostics_tools.py",
-             "zabbix_tools.py", "bin/zabbix-watch"):
+             "zabbix_tools.py", "bin/zabbix-watch", "bin/kuk-boiler-watch"):
     path = root / name
     compile(path.read_bytes(), name, "exec")
 print("Source syntax preflight passed")
@@ -74,8 +98,10 @@ for module in gitea_tools.py youtrack_tools.py git_workflow_tools.py agent_tools
 done
 
 install -d -o "${SERVICE_USER}" -g "${SERVICE_USER}" "/home/${SERVICE_USER}/bin"
-install -o "${SERVICE_USER}" -g "${SERVICE_USER}" -m 0755 \
-  "${SOURCE_DIR}/bin/zabbix-watch" "/home/${SERVICE_USER}/bin/zabbix-watch"
+for helper in zabbix-watch kuk-boiler-watch; do
+  install -o "${SERVICE_USER}" -g "${SERVICE_USER}" -m 0755 \
+    "${SOURCE_DIR}/bin/${helper}" "/home/${SERVICE_USER}/bin/${helper}"
+done
 
 chown -R "${SERVICE_USER}:${SERVICE_USER}" "${INSTALL_DIR}"
 
@@ -100,6 +126,9 @@ systemctl is-active --quiet hbf-mcp
 
 echo
 echo "Installed HBF MCP."
+if [[ -n "${BACKUP_DIR}" ]]; then
+  echo "Previous installation backup: ${BACKUP_DIR}"
+fi
 echo
 echo "Service:"
 echo "  systemctl status hbf-mcp --no-pager"

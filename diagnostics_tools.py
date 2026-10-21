@@ -62,10 +62,12 @@ def register_tools(mcp:Any)->None:
                     'gitea':(HOME/'credentials/gitea.yml').is_file(),
                     'youtrack':(HOME/'credentials/youtrack.yml').is_file(),
                     'ese_browser':(HOME/'credentials/ese-browser.json').is_file(),
-                    'zabbix':(HOME/'credentials/zabbix.yml').is_file()},
+                    'zabbix':(HOME/'credentials/zabbix.yml').is_file(),
+                    'influxdb':(HOME/'credentials/influxdb.yml').is_file()},
                 'helpers_present':{
                     'dsh_api':(HOME/'bin/dsh-remote').is_file(),
                     'zabbix_watch':(HOME/'bin/zabbix-watch').is_file(),
+                    'boiler_watch':(HOME/'bin/kuk-boiler-watch').is_file(),
                     'playwright':(HOME/'projects/esekretariat/ese-agent/tools/browser/node_modules').is_dir()},
                 'shell_enabled_in_service':True,
                 'notes':'Disk presence does not prove registered tools are active; refresh tools after service restart.'}

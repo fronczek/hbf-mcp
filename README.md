@@ -61,19 +61,36 @@ Suggested VM size:
 
 ## Install
 
+Run as root:
+
 ```bash
 git clone https://github.com/fronczek/hbf-mcp.git
 cd hbf-mcp
-sudo ./install.sh
+bash ./install.sh
 ```
 
-Check the service:
+The installer backs up an existing installation under /var/backups/hbf-mcp,
+installs dependencies, deploys the source, restarts the service and checks it is active.
+
+Optional diagnostics:
 
 ```bash
 systemctl status hbf-mcp --no-pager
 journalctl -u hbf-mcp -f
 ss -lntp | grep 8765
 ```
+
+## Upgrade
+
+Run as root in the existing checkout:
+
+```bash
+git pull --ff-only
+bash ./install.sh
+```
+
+The same installer preserves existing configuration, credentials and operation state,
+backs up the previous installation, updates dependencies and restarts the service.
 
 ## Local test
 
@@ -221,3 +238,7 @@ For manual checks before a controlled service restart:
 ```bash
 /home/gptagent/bin/zabbix-watch --hours 24
 ```
+
+The tracked bin/kuk-boiler-watch helper is installed and upgraded together with
+bin/zabbix-watch. Its local InfluxDB credentials remain in
+/home/gptagent/credentials/influxdb.yml; install.sh never replaces that file.
