@@ -77,4 +77,16 @@ class Gitea:
     def commit_status(self, repo: str, ref: str):
         if not re.fullmatch(r"[A-Fa-f0-9]{7,64}|[A-Za-z0-9._/-]{1,150}", ref) or ".." in ref:
             raise ValueError("Invalid commit/ref")
-        return self._call(self._repo(repo) + "/commits/" + urllib.parse.quote(ref, safe="") + "/status")
+        data = self._call(self._repo(repo) + "/commits/" + urllib.parse.quote(ref, safe="") + "/status")
+        statuses = data.get("statuses", [])
+        if not isinstance(statuses, list):
+            raise RuntimeError("Gitea returned an invalid status list")
+        return {
+            "state": data.get("state"),
+            "sha": data.get("sha"),
+            "total_count": data.get("total_count", len(statuses)),
+            "statuses": [{key: item.get(key) for key in
+                          ("id", "status", "context", "description", "target_url", "created_at")}
+                         for item in statuses[:50] if isinstance(item, dict)],
+            "statuses_truncated": len(statuses) > 50,
+        }

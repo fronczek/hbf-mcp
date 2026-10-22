@@ -96,6 +96,21 @@ class ClientsTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "PR or pagination"):
             Gitea().pull_files("secnet/ese-agent", 0)
 
+    def test_commit_status_returns_bounded_summary(self):
+        api = Gitea()
+        payload = {"state": "success", "sha": "abc", "total_count": 51,
+                   "repository": {"permissions": {"admin": True}},
+                   "statuses": [{"id": n, "status": "success", "context": f"job-{n}",
+                                 "description": "ok", "private_field": "drop"}
+                                for n in range(51)]}
+        with patch.object(api, "_call", return_value=payload):
+            result = api.commit_status("secnet/ese-backend", "master")
+        self.assertEqual(result["total_count"], 51)
+        self.assertEqual(len(result["statuses"]), 50)
+        self.assertTrue(result["statuses_truncated"])
+        self.assertNotIn("repository", result)
+        self.assertNotIn("private_field", result["statuses"][0])
+
     def test_dsh_requires_valid_issue_and_budget(self):
         with self.assertRaises(ValueError):
             flash_task("../ESE-1", "A bounded task description long enough", workdir="/tmp")
