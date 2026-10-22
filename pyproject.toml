@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hbf-api-tools"
+version = "0.1.0"
+description = "Client-independent typed clients for HBF APIs"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+hbf-api = "hbf_api_tools.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
