@@ -26,11 +26,12 @@ hbf-api youtrack issue ISSUE-ID
 hbf-api youtrack comments ISSUE-ID [--limit N]
 hbf-api youtrack add-comment ISSUE-ID --apply   # comment body from stdin
 hbf-api gitea connection|branches|pulls|pull|diff|files|status ...
+hbf-api gitea create-pr REPO --title TITLE --head BRANCH --base master --apply  # body from stdin
 hbf-api dsh sessions [--limit N]
 hbf-api dsh flash ISSUE-ID --workdir ABSOLUTE-HARNESS-PATH --apply [--max-usd N]
 ```
 
-DSH task and YouTrack comment text are read from stdin, not command-line arguments (so they do not end up in shell history or command approval prompts). Set `HBF_DSH_HELPER` to the installed helper; the default is `~/bin/dsh-remote`. Its HTTPS authentication is managed by that helper and is not yet migrated to a portable token-file contract. Task dispatch requires an explicit work directory, a bounded budget, an allowed workdir (`HBF_DSH_ALLOWED_WORKDIRS`, path-separated), and `--apply`.
+DSH task, YouTrack comment, and Gitea PR body text are read from stdin, not command-line arguments (so they do not end up in shell history or command approval prompts). Set `HBF_DSH_HELPER` to the installed helper; the default is `~/bin/dsh-remote`. Its HTTPS authentication is managed by that helper and is not yet migrated to a portable token-file contract. Task dispatch requires an explicit work directory, a bounded budget, an allowed workdir (`HBF_DSH_ALLOWED_WORKDIRS`, path-separated), and `--apply`. PR creation checks for an existing matching head/base before writing; if the HTTP outcome is ambiguous, inspect Gitea before retrying.
 
 Gitea defaults to an exact repository allowlist; override it with `HBF_GITEA_REPOSITORIES` (comma-separated exact `owner/repo` values). Read operations are the default. Every external mutation must have an explicit, reviewable invocation and must never be retried blindly after an ambiguous network outcome.
 

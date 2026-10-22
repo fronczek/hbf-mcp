@@ -1,0 +1,24 @@
+name: Python tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile package and tests
+        run: python3 -m compileall -q src tests
+
+      - name: Run offline unit tests
+        run: env PYTHONPATH=src python3 -B -m unittest discover -s tests -v
+
+      - name: Build wheel
+        run: python3 -m pip wheel --no-deps --no-build-isolation --wheel-dir /tmp/hbf-api-tools-wheels .

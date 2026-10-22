@@ -28,6 +28,10 @@ def _parser() -> argparse.ArgumentParser:
     diff = gt.add_parser("diff"); diff.add_argument("repo"); diff.add_argument("number", type=int)
     files = gt.add_parser("files"); files.add_argument("repo"); files.add_argument("number", type=int); files.add_argument("--page", type=int, default=1); files.add_argument("--limit", type=int, default=30)
     st = gt.add_parser("status"); st.add_argument("repo"); st.add_argument("ref")
+    create = gt.add_parser("create-pr", help="create a PR (body from stdin)")
+    create.add_argument("repo"); create.add_argument("--title", required=True)
+    create.add_argument("--head", required=True); create.add_argument("--base", default="master")
+    create.add_argument("--apply", action="store_true", help="confirm external write")
 
     ds = groups.add_parser("dsh", help="Bounded DeepSeek Harness operations").add_subparsers(dest="op", required=True)
     sessions = ds.add_parser("sessions"); sessions.add_argument("--limit", type=int, default=10)
@@ -50,6 +54,8 @@ def main(argv: list[str] | None = None) -> int:
             elif args.op == "comments": result = api.comments(args.issue_id, args.limit)
             elif args.op == "add-comment": result = api.add_comment(args.issue_id, sys.stdin.read(10_001))
         elif args.service == "gitea":
+            if args.op == "create-pr" and not args.apply:
+                raise ValueError("Write not sent; repeat with --apply to confirm")
             api = Gitea()
             if args.op == "connection": result = api.connection()
             elif args.op == "branches": result = api.branches(args.repo, args.page, args.limit)
@@ -58,6 +64,9 @@ def main(argv: list[str] | None = None) -> int:
             elif args.op == "diff": result = api.pull_diff(args.repo, args.number)
             elif args.op == "files": result = api.pull_files(args.repo, args.number, args.page, args.limit)
             elif args.op == "status": result = api.commit_status(args.repo, args.ref)
+            elif args.op == "create-pr":
+                result = api.create_pull_request(args.repo, args.title, args.head, args.base,
+                                                 sys.stdin.read(20_001))
         else:
             if args.op == "sessions": result = dsh.sessions(args.limit)
             elif args.op == "flash":

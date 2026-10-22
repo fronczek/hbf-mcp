@@ -35,9 +35,23 @@ class Gitea:
             raise ValueError("Repository is outside the configured allowlist")
         return "/repos/" + "/".join(urllib.parse.quote(p, safe="") for p in name.split("/"))
 
-    def _call(self, route: str, query: dict | None = None):
+    def _call(self, route: str, query: dict | None = None, *, method: str = "GET",
+              payload: dict | None = None):
         return request_json(self.base, "/api/v1" + route, self.token,
-                            query=query, auth_scheme="token")
+                            method=method, query=query, payload=payload,
+                            auth_scheme="token")
+
+    @staticmethod
+    def _ref(value: str, label: str) -> str:
+        if (not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9._/-]{1,150}", value)
+                or value.startswith("/") or ".." in value.split("/")):
+            raise ValueError(f"Invalid {label} ref")
+        return value
+
+    def _confirm_gpt(self) -> None:
+        user = self._call("/user")
+        if user.get("login") != "gpt":
+            raise ConfigurationError("Refusing Gitea mutation: credential is not the GPT identity")
 
     def connection(self):
         result = self._call("/user")
@@ -73,6 +87,44 @@ class Gitea:
             raise ValueError("Invalid PR or pagination bounds")
         return self._call(self._repo(repo) + f"/pulls/{number}/files",
                           {"page": page, "limit": limit})
+
+    def create_pull_request(self, repo: str, title: str, head: str, base: str,
+                            body: str) -> dict:
+        route = self._repo(repo)
+        head, base = self._ref(head, "head"), self._ref(base, "base")
+        title, body = title.strip(), body.strip()
+        if not 1 <= len(title) <= 200 or len(body) > 20_000:
+            raise ValueError("PR title must be 1..200 characters and body at most 20000")
+        self._confirm_gpt()
+        # Inspect all pages up to a fixed ceiling before writing. On a timeout or
+        # other ambiguous outcome, inspect again before retrying the operation.
+        for page in range(1, 11):
+            existing = self._call(route + "/pulls", {"state": "all", "page": page, "limit": 100})
+            if not isinstance(existing, list):
+                raise RuntimeError("Gitea returned an invalid PR list")
+            for item in existing:
+                source = item.get("head") or {}
+                target = item.get("base") or {}
+                source_repo = source.get("repo") or {}
+                if (source.get("ref") == head and target.get("ref") == base
+                        and source_repo.get("full_name") == repo):
+                    return {"created": False, "existing": True, "number": item.get("number"),
+                            "state": item.get("state"), "url": item.get("html_url"),
+                            "head_sha": (source.get("sha"))}
+            if len(existing) < 100:
+                break
+        else:
+            raise RuntimeError("PR duplicate check reached its page limit; refusing to create")
+        result = self._call(route + "/pulls", method="POST", payload={
+            "title": title, "head": head, "base": base, "body": body,
+            "maintainer_can_modify": False,
+        })
+        user = result.get("user") or {}
+        if user.get("login") != "gpt":
+            raise RuntimeError("Gitea did not confirm GPT as the PR author")
+        return {"created": True, "number": result.get("number"),
+                "state": result.get("state"), "url": result.get("html_url"),
+                "head_sha": (result.get("head") or {}).get("sha")}
 
     def commit_status(self, repo: str, ref: str):
         if not re.fullmatch(r"[A-Fa-f0-9]{7,64}|[A-Za-z0-9._/-]{1,150}", ref) or ".." in ref:

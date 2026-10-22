@@ -111,6 +111,37 @@ class ClientsTest(unittest.TestCase):
         self.assertNotIn("repository", result)
         self.assertNotIn("private_field", result["statuses"][0])
 
+    def test_create_pr_checks_identity_and_duplicate_before_write(self):
+        api = Gitea()
+        with patch.object(api, "_call", side_effect=[
+                {"login": "gpt"}, [], {"number": 42, "state": "open", "html_url": "https://git.hbf.pl/pr/42",
+                                       "user": {"login": "gpt"}, "head": {"sha": "a" * 40}}]) as call:
+            result = api.create_pull_request("hbf/hbf-api-tools", "Tests", "feat/portable-api-tools",
+                                             "master", "CI-ready body")
+        self.assertTrue(result["created"])
+        self.assertEqual(result["number"], 42)
+        self.assertEqual(call.call_count, 3)
+        self.assertEqual(call.call_args.kwargs["method"], "POST")
+
+    def test_create_pr_does_not_duplicate_matching_head_and_base(self):
+        api = Gitea()
+        existing = [{"number": 42, "state": "open", "html_url": "https://git.hbf.pl/pr/42",
+                     "head": {"ref": "feat/portable-api-tools", "sha": "a" * 40,
+                              "repo": {"full_name": "hbf/hbf-api-tools"}},
+                     "base": {"ref": "master"}}]
+        with patch.object(api, "_call", side_effect=[{"login": "gpt"}, existing]) as call:
+            result = api.create_pull_request("hbf/hbf-api-tools", "Tests", "feat/portable-api-tools",
+                                             "master", "body")
+        self.assertFalse(result["created"])
+        self.assertTrue(result["existing"])
+        self.assertEqual(call.call_count, 2)
+
+    def test_cli_pr_without_apply_does_not_load_credentials(self):
+        with patch("hbf_api_tools.cli.Gitea", side_effect=AssertionError("must not load")):
+            with redirect_stderr(io.StringIO()):
+                self.assertEqual(main(["gitea", "create-pr", "hbf/hbf-api-tools",
+                                       "--title", "Tests", "--head", "branch"]), 2)
+
     def test_dsh_requires_valid_issue_and_budget(self):
         with self.assertRaises(ValueError):
             flash_task("../ESE-1", "A bounded task description long enough", workdir="/tmp")
