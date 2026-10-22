@@ -17,19 +17,24 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         raise ApiError("API redirect refused")
 
 
-def request_raw(base: str, route: str, token: str, *, method: str = "GET",
-                query: dict[str, Any] | None = None, payload: dict | None = None,
-                auth_scheme: str = "Bearer", accept: str = "application/json") -> bytes:
+def request_raw(base: str, route: str, token: str | None, *, method: str = "GET",
+                query: dict[str, Any] | None = None, payload: dict | str | None = None,
+                auth_scheme: str = "Bearer", accept: str = "application/json",
+                content_type: str = "application/json") -> bytes:
     if not route.startswith("/") or route.startswith("//"):
         raise ValueError("API route must be an absolute path")
     url = base.rstrip("/") + route
     if query:
         url += "?" + urllib.parse.urlencode(query)
-    body = None if payload is None else json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=body, method=method, headers={
-        "Authorization": f"{auth_scheme} {token}", "Accept": accept,
-        "Content-Type": "application/json", "User-Agent": "hbf-api-tools/0.1",
-    })
+    body = None if payload is None else (
+        payload.encode("utf-8") if isinstance(payload, str)
+        else json.dumps(payload).encode("utf-8")
+    )
+    headers = {"Accept": accept, "Content-Type": content_type,
+               "User-Agent": "hbf-api-tools/0.1"}
+    if token:
+        headers["Authorization"] = f"{auth_scheme} {token}"
+    req = urllib.request.Request(url, data=body, method=method, headers=headers)
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
     try:
         with opener.open(req, timeout=20) as response:

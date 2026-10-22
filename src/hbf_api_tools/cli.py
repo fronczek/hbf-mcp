@@ -7,6 +7,7 @@ import sys
 
 from . import dsh
 from .gitea import Gitea
+from .monitoring import influx_report, list_profiles, load_monitoring_config, zabbix_report
 from .youtrack import YouTrack
 
 
@@ -39,6 +40,18 @@ def _parser() -> argparse.ArgumentParser:
     flash.add_argument("issue_id"); flash.add_argument("--workdir", required=True, help="absolute Harness workspace path")
     flash.add_argument("--max-usd", type=float, default=1.0)
     flash.add_argument("--timeout", type=int, default=180); flash.add_argument("--apply", action="store_true")
+
+    mon = groups.add_parser("monitor", help="Read-only configured monitoring checks")
+    mon.add_argument("--config", help="YAML check definitions (defaults to the packaged monitoring.yml)")
+    mo = mon.add_subparsers(dest="op", required=True)
+    ml = mo.add_parser("list", help="list configured Zabbix and Influx profiles")
+    mz = mo.add_parser("zabbix", help="run a configured Zabbix profile")
+    mz.add_argument("profile"); mz.add_argument("--hours", type=int, default=24)
+    mi = mo.add_parser("influx", help="run a configured Influx profile")
+    mi.add_argument("profile"); mi.add_argument("--hours", type=int)
+    for command in (ml, mz, mi):
+        command.add_argument("--config", default=argparse.SUPPRESS,
+                             help="YAML check definitions (defaults to the packaged monitoring.yml)")
     return p
 
 
@@ -67,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
             elif args.op == "create-pr":
                 result = api.create_pull_request(args.repo, args.title, args.head, args.base,
                                                  sys.stdin.read(20_001))
-        else:
+        elif args.service == "dsh":
             if args.op == "sessions": result = dsh.sessions(args.limit)
             elif args.op == "flash":
                 if not args.apply:
@@ -75,9 +88,16 @@ def main(argv: list[str] | None = None) -> int:
                 task = sys.stdin.read(8_001)
                 result = dsh.flash_task(args.issue_id, task, workdir=args.workdir, max_usd=args.max_usd,
                                         timeout_seconds=args.timeout)
+        else:
+            if args.op == "list":
+                result = list_profiles(load_monitoring_config(args.config))
+            elif args.op == "zabbix":
+                result = zabbix_report(args.profile, args.hours, config_path=args.config)
+            elif args.op == "influx":
+                result = influx_report(args.profile, args.hours, config_path=args.config)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
-    except (RuntimeError, ValueError) as exc:
+    except (RuntimeError, ValueError, TypeError) as exc:
         print(f"hbf-api: {exc}", file=sys.stderr)
         return 2
 

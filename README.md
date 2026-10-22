@@ -17,6 +17,8 @@ Credential contracts (flat YAML scalar keys; values remain local):
 | `youtrack.yml` | `youtrack_url`, `youtrack_token_value` |
 | `gitea.yml` | `gitea_url`, `token_value` |
 | DSH helper | `HBF_DSH_HELPER` points to the installed `dsh-remote` HTTPS helper; its Harness auth remains private to that helper |
+| Zabbix monitoring | `zabbix.yml`: `zabbix_url`, `zabbix_token_value` |
+| Influx monitoring | `influxdb_<bucket>.yml`: `influx_url`, `influx_org`, `influx_bucket`, `influx_token` |
 
 The first CLI surface is:
 
@@ -29,17 +31,20 @@ hbf-api gitea connection|branches|pulls|pull|diff|files|status ...
 hbf-api gitea create-pr REPO --title TITLE --head BRANCH --base master --apply  # body from stdin
 hbf-api dsh sessions [--limit N]
 hbf-api dsh flash ISSUE-ID --workdir ABSOLUTE-HARNESS-PATH --apply [--max-usd N]
+hbf-api monitor list
+hbf-api monitor zabbix PROFILE [--hours 24] [--config PATH]
+hbf-api monitor influx PROFILE [--hours N] [--config PATH]
 ```
 
 DSH task, YouTrack comment, and Gitea PR body text are read from stdin, not command-line arguments (so they do not end up in shell history or command approval prompts). Set `HBF_DSH_HELPER` to the installed helper; the default is `~/bin/dsh-remote`. Its HTTPS authentication is managed by that helper and is not yet migrated to a portable token-file contract. Task dispatch requires an explicit work directory, a bounded budget, an allowed workdir (`HBF_DSH_ALLOWED_WORKDIRS`, path-separated), and `--apply`. PR creation checks for an existing matching head/base before writing; if the HTTP outcome is ambiguous, inspect Gitea before retrying.
 
 Gitea defaults to an exact repository allowlist; override it with `HBF_GITEA_REPOSITORIES` (comma-separated exact `owner/repo` values). Read operations are the default. Every external mutation must have an explicit, reviewable invocation and must never be retried blindly after an ambiguous network outcome.
 
-This initial version has not performed live API calls. Network smoke tests should be opt-in and read-only by default; local unit tests must not need credentials.
+Live API checks are opt-in and read-only; local unit tests and CI do not need credentials.
 
 ## Development
 
-The package targets Python 3.11+ and the standard library for its core. Run offline tests with `PYTHONPATH=src python3 -m unittest discover -s tests -v`.
+The package targets Python 3.11+ and uses PyYAML for safe monitoring-profile parsing. Run offline tests with `PYTHONPATH=src python3 -m unittest discover -s tests -v`.
 
 ## Use from Codex or an MCP service
 
@@ -56,3 +61,38 @@ issue = yt.issue("ESE-801")
 An MCP adapter should call these typed methods and expose only the operations it needs. Do not copy API logic into `hbf-mcp`. Set `HBF_CREDENTIALS_DIR` in the service environment if its installed package cannot find the machine-local `.credentials` directory by walking upward from its own package path. MCP server tools should mark reads and writes accurately and keep `--apply`-equivalent confirmation for mutations.
 
 For shell-based clients, install into a dedicated virtual environment and approve only that environment's stable `hbf-api` executable prefix. The package does not and cannot override the client's command-approval policy.
+
+## Configuration-driven monitoring
+
+`hbf-api monitor` runs read-only Zabbix and Influx checks defined in the packaged
+[`src/hbf_api_tools/monitoring.yml`](src/hbf_api_tools/monitoring.yml). Override
+the YAML with `--config PATH` to add or tune named profiles without editing
+client code. It uses `safe_load`; profiles define selectors, windows, thresholds
+and supported rule types, never credentials or arbitrary API/Flux requests.
+Credentials stay in private `.credentials/zabbix.yml` and
+`.credentials/influxdb_<bucket>.yml` files; each Influx profile selects the
+credential file matching its bucket.
+
+The initial Zabbix profile selects `hbfplhpved*` hosts and CPU/NVMe temperature
+items. The initial Influx profile models the Kuk-Boiler Home Assistant entities,
+derives office L1 load, and evaluates its four existing consistency rules.
+Windows are bounded to 1–168 hours and host/item/signal/rule results have
+explicit limits. CI uses Gitea's `ubuntu-latest`; the moving runner image may
+change over time. Offline tests use mocked API data: they do not prove live
+connectivity or validate deployed sensor/entity names.
+
+Profile fields:
+
+- Zabbix `hosts` and metric `item_keys` accept literal selectors with `*`
+  wildcards; metrics may define numeric `thresholds`. Alert severity and
+  availability-name matching are profile fields.
+- Influx profiles choose `credentials` by bucket suffix and define `signals`
+  from an exact `_field`, optional `_measurement`, and exact `tags` map. Each
+  signal may set `range_hours` and a bounded `aggregate_window`/function.
+  `derived_signals` supports add, subtract, multiply, and divide. Rules use the
+  built-in generic types `threshold`, `sustained_delta`,
+  `sustained_range_mismatch`, `sustained_pair`, and `paired_window_delta`.
+- Without `--hours`, per-signal ranges and the profile's evaluation window
+  apply; an explicit `--hours` overrides them for the requested report.
+- A missing or stale required signal yields `UNKNOWN`; it is not reported as
+  healthy merely because no alert rule matched.
