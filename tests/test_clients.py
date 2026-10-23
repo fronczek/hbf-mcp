@@ -7,8 +7,10 @@ import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
 from unittest.mock import patch
+from types import SimpleNamespace
 
 from hbf_api_tools import config
+from hbf_api_tools.identity import acting_agent
 from hbf_api_tools.gitea import Gitea
 from hbf_api_tools.youtrack import YouTrack
 from hbf_api_tools.dsh import flash_task
@@ -22,6 +24,7 @@ class ClientsTest(unittest.TestCase):
         self.cred = Path(self.temp.name) / ".credentials"
         self.cred.mkdir(mode=0o700)
         for name, contents in (
+            ("agent.yml", "agent_login: gpt\nagent_host: hbfplhmcpu01\nagent_unix_user: gptagent\n"),
             ("youtrack.yml", "youtrack_url: https://youtrack.hbf.pl\nyoutrack_token_value: secret\n"),
             ("gitea.yml", "gitea_url: https://git.hbf.pl\ntoken_value: secret\n"),
         ):
@@ -30,9 +33,15 @@ class ClientsTest(unittest.TestCase):
             path.chmod(0o600)
         self.env = patch.dict(os.environ, {"HBF_CREDENTIALS_DIR": str(self.cred)}, clear=False)
         self.env.start()
+        self.host = patch("hbf_api_tools.identity.socket.gethostname", return_value="hbfplhmcpu01")
+        self.user = patch("hbf_api_tools.identity.pwd.getpwuid", return_value=SimpleNamespace(pw_name="gptagent"))
+        self.host.start()
+        self.user.start()
         os.environ.pop("HBF_GITEA_REPOSITORIES", None)
 
     def tearDown(self):
+        self.user.stop()
+        self.host.stop()
         self.env.stop()
         self.temp.cleanup()
 
@@ -66,6 +75,86 @@ class ClientsTest(unittest.TestCase):
             "youtrack_url: https://attacker.example\nyoutrack_token_value: secret\n")
         with self.assertRaisesRegex(config.ConfigurationError, "trusted HTTPS"):
             YouTrack()
+
+    def test_dsh_write_requires_tier_attribution(self):
+        from hbf_api_tools.identity import add_attribution
+        with self.assertRaisesRegex(config.ConfigurationError, "explicit dsh-pro or dsh-flash"):
+            add_attribution("work completed", "dsh")
+        self.assertEqual(add_attribution("work completed\n\nadded by dsh-flash", "dsh"),
+                         "work completed\n\nadded by dsh-flash")
+
+    def test_gitea_read_refuses_owner_token(self):
+        from hbf_api_tools import gitea as mod
+        api = Gitea()
+        with patch.object(mod, "request_json", return_value={"login": "artur"}) as call:
+            with self.assertRaisesRegex(config.ConfigurationError, "does not match local agent"):
+                api.branches("secnet/ese-agent")
+        self.assertEqual(call.call_count, 1)
+
+    def test_youtrack_read_refuses_owner_token(self):
+        api = YouTrack()
+        with patch.object(youtrack_module, "request_json", return_value={"login": "artur"}) as call:
+            with self.assertRaisesRegex(config.ConfigurationError, "token does not match"):
+                api.search("project: ESE")
+        self.assertEqual(call.call_count, 1)
+
+    def test_profile_from_separate_agent_refused(self):
+        (self.cred / "agent.yml").write_text(
+            "agent_login: dsh\nagent_host: hbfplhdshu01\nagent_unix_user: afronczek\n")
+        with self.assertRaisesRegex(config.ConfigurationError, "does not match trusted host"):
+            acting_agent()
+
+    def test_other_host_is_refused_even_with_gpt_credentials(self):
+        with patch("hbf_api_tools.identity.socket.gethostname", return_value="random-host"):
+            with self.assertRaisesRegex(config.ConfigurationError, "refused on this host"):
+                acting_agent()
+
+    def test_other_unix_user_is_refused_even_with_gpt_credentials(self):
+        with patch("hbf_api_tools.identity.pwd.getpwuid", return_value=SimpleNamespace(pw_name="afronczek")):
+            with self.assertRaisesRegex(config.ConfigurationError, "refused on this host"):
+                acting_agent()
+
+    def test_dsh_host_and_actor_are_allowed_when_bound(self):
+        (self.cred / "agent.yml").write_text(
+            "agent_login: dsh\nagent_host: hbfplhdshu01\nagent_unix_user: afronczek\n")
+        with patch("hbf_api_tools.identity.socket.gethostname", return_value="hbfplhdshu01"), \
+             patch("hbf_api_tools.identity.pwd.getpwuid", return_value=SimpleNamespace(pw_name="afronczek")):
+            self.assertEqual(acting_agent(), "dsh")
+
+    def test_gitea_refuses_wrong_token_before_pr_create(self):
+        api = Gitea()
+        with patch.object(api, "_call", return_value={"login": "dsh"}) as calls:
+            with self.assertRaisesRegex(config.ConfigurationError, "token does not match"):
+                api.create_pull_request("hbf/hbf-api-tools", "title", "head", "master", "body")
+        self.assertEqual(calls.call_count, 1)
+
+    def test_comment_and_pr_have_agent_footer(self):
+        api = YouTrack()
+        with patch.object(youtrack_module, "request_json", side_effect=[
+                {"login": "gpt"}, {"id": "c1", "author": {"login": "gpt"}}]) as request:
+            api.add_comment("ESE-1", "Checked in CI")
+        self.assertEqual(request.call_args.kwargs["payload"]["text"],
+                         "Checked in CI\n\nadded by gpt-lindir")
+        git = Gitea()
+        with patch.object(git, "_call", side_effect=[
+                {"login": "gpt"}, [], {"number": 10, "state": "open", "user": {"login": "gpt"}}]) as call:
+            git.create_pull_request("hbf/hbf-api-tools", "title", "head", "master", "description")
+        self.assertEqual(call.call_args.kwargs["payload"]["body"],
+                         "description\n\nadded by gpt-lindir")
+
+    def test_credential_lookup_defaults_only_to_home_not_repo(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            home.mkdir()
+            forbidden = root / "checkout" / ".credentials"
+            forbidden.mkdir(parents=True, mode=0o700)
+            with patch.dict(os.environ, {}, clear=True), \
+                 patch("hbf_api_tools.config.Path.home", return_value=home):
+                with self.assertRaisesRegex(config.ConfigurationError, "~/.credentials"):
+                    config.credentials_dir()
+                (home / ".credentials").mkdir(mode=0o700)
+                self.assertEqual(config.credentials_dir(), home / ".credentials")
 
     def test_gitea_default_repo_allowlist(self):
         api = Gitea()
@@ -161,7 +250,7 @@ class ClientsTest(unittest.TestCase):
     def test_youtrack_write_requires_gpt_identity(self):
         api = YouTrack()
         with patch.object(youtrack_module, "request_json", return_value={"login": "owner"}) as call:
-            with self.assertRaisesRegex(config.ConfigurationError, "not the GPT identity"):
+            with self.assertRaisesRegex(config.ConfigurationError, "token does not match local agent identity"):
                 api.add_comment("ESE-1", "a comment")
         self.assertEqual(call.call_count, 1)
 

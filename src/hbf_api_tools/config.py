@@ -16,23 +16,24 @@ def credentials_dir() -> Path:
         path = Path(explicit).expanduser().resolve()
         if not path.is_dir():
             raise ConfigurationError("HBF_CREDENTIALS_DIR is not a directory")
+        if Path(explicit).expanduser().is_symlink():
+            raise ConfigurationError("Credential directory symlink is forbidden")
         if path.stat().st_mode & 0o077:
             raise ConfigurationError("Credentials directory must be private (mode 0700)")
+        if path.stat().st_uid != os.geteuid():
+            raise ConfigurationError("Credentials directory is not owned by the invoking user")
         return path
 
-    # Search from this installed source/package, never from the caller's CWD.
-    for parent in Path(__file__).resolve().parents:
-        candidate = parent / ".credentials"
-        if candidate.is_dir():
-            if candidate.stat().st_mode & 0o077:
-                raise ConfigurationError("Credentials directory must be private (mode 0700)")
-            return candidate
+    # Never discover credentials inside repositories or another agent's worktree.
+    # The Unix account's private home is the only implicit source.
     fallback = Path.home() / ".credentials"
-    if fallback.is_dir():
-        if fallback.stat().st_mode & 0o077:
-            raise ConfigurationError("Credentials directory must be private (mode 0700)")
-        return fallback
-    raise ConfigurationError("Credentials directory not found; set HBF_CREDENTIALS_DIR")
+    if fallback.is_symlink() or not fallback.is_dir():
+        raise ConfigurationError("Private ~/.credentials directory not found")
+    if fallback.stat().st_mode & 0o077:
+        raise ConfigurationError("Credentials directory must be private (mode 0700)")
+    if fallback.stat().st_uid != os.geteuid():
+        raise ConfigurationError("Credentials directory is not owned by the invoking user")
+    return fallback
 
 
 def load_scalar_yaml(name: str) -> dict[str, str]:
@@ -44,7 +45,7 @@ def load_scalar_yaml(name: str) -> dict[str, str]:
         info = path.lstat()
     except OSError:
         raise ConfigurationError(f"Credential file {name} is unavailable") from None
-    if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
+    if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or info.st_uid != os.geteuid():
         raise ConfigurationError(f"Credential file {name} must be private (mode 0600)")
     values: dict[str, str] = {}
     try:

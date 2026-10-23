@@ -7,6 +7,7 @@ import urllib.parse
 
 from .config import ConfigurationError, load_scalar_yaml
 from .http import request_json, request_raw
+from .identity import acting_agent, add_attribution
 
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 DEFAULT_REPOS = ("secnet/ese-agent", "secnet/ese-backend", "secnet/ese-frontend",
@@ -24,6 +25,7 @@ class Gitea:
             raise ConfigurationError("Gitea credential must use https://git.hbf.pl")
         if not self.token:
             raise ConfigurationError("Gitea token is missing")
+        self._identity_verified = False
         configured = os.environ.get("HBF_GITEA_REPOSITORIES", "")
         self.repositories = frozenset(x.strip() for x in configured.split(",") if x.strip()) if configured else frozenset(DEFAULT_REPOS)
         if not self.repositories or any(not REPO_RE.fullmatch(x) or
@@ -37,9 +39,18 @@ class Gitea:
 
     def _call(self, route: str, query: dict | None = None, *, method: str = "GET",
               payload: dict | None = None):
-        return request_json(self.base, "/api/v1" + route, self.token,
-                            method=method, query=query, payload=payload,
-                            auth_scheme="token")
+        # Before EVERY API operation (including reads), verify that the token
+        # belongs to this host's designated agent. Cache only within this client.
+        if route != "/user" and not self._identity_verified:
+            self._call("/user")
+        result = request_json(self.base, "/api/v1" + route, self.token,
+                              method=method, query=query, payload=payload,
+                              auth_scheme="token")
+        if route == "/user":
+            if result.get("login") != acting_agent():
+                raise ConfigurationError("Gitea token does not match local agent identity")
+            self._identity_verified = True
+        return result
 
     @staticmethod
     def _ref(value: str, label: str) -> str:
@@ -48,10 +59,12 @@ class Gitea:
             raise ValueError(f"Invalid {label} ref")
         return value
 
-    def _confirm_gpt(self) -> None:
+    def _confirm_agent(self) -> str:
+        actor = acting_agent()
         user = self._call("/user")
-        if user.get("login") != "gpt":
-            raise ConfigurationError("Refusing Gitea mutation: credential is not the GPT identity")
+        if user.get("login") != actor:
+            raise ConfigurationError("Refusing Gitea mutation: token does not match local agent identity")
+        return actor
 
     def connection(self):
         result = self._call("/user")
@@ -78,6 +91,8 @@ class Gitea:
     def pull_diff(self, repo: str, number: int) -> str:
         if number < 1:
             raise ValueError("PR number must be positive")
+        if not self._identity_verified:
+            self._call("/user")
         raw = request_raw(self.base, "/api/v1" + self._repo(repo) + f"/pulls/{number}.diff",
                           self.token, auth_scheme="token", accept="text/plain")
         return raw.decode("utf-8", errors="replace")
@@ -95,7 +110,10 @@ class Gitea:
         title, body = title.strip(), body.strip()
         if not 1 <= len(title) <= 200 or len(body) > 20_000:
             raise ValueError("PR title must be 1..200 characters and body at most 20000")
-        self._confirm_gpt()
+        actor = self._confirm_agent()
+        body = add_attribution(body, actor)
+        if len(body) > 20_000:
+            raise ValueError("PR body with agent attribution exceeds the limit")
         # Inspect all pages up to a fixed ceiling before writing. On a timeout or
         # other ambiguous outcome, inspect again before retrying the operation.
         for page in range(1, 11):
@@ -120,8 +138,8 @@ class Gitea:
             "maintainer_can_modify": False,
         })
         user = result.get("user") or {}
-        if user.get("login") != "gpt":
-            raise RuntimeError("Gitea did not confirm GPT as the PR author")
+        if user.get("login") != actor:
+            raise RuntimeError("Gitea did not confirm acting agent as the PR author")
         return {"created": True, "number": result.get("number"),
                 "state": result.get("state"), "url": result.get("html_url"),
                 "head_sha": (result.get("head") or {}).get("sha")}
