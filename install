@@ -224,14 +224,14 @@ import pathlib
 import sys
 
 root = pathlib.Path(sys.argv[1])
-for name in ("server.py", "test_client.py", "gitea_tools.py", "youtrack_tools.py",
+for name in ("server.py", "test_client.py", "auth0_resource.py", "gitea_tools.py", "youtrack_tools.py",
              "git_workflow_tools.py", "agent_tools.py", "diagnostics_tools.py",
              "zabbix_tools.py", "bin/zabbix-watch", "bin/kuk-boiler-watch"):
     compile((root / name).read_bytes(), name, "exec")
 print("Source syntax preflight passed")
 PY
 
-for module in server.py test_client.py gitea_tools.py youtrack_tools.py \
+for module in server.py test_client.py auth0_resource.py gitea_tools.py youtrack_tools.py \
               git_workflow_tools.py agent_tools.py diagnostics_tools.py zabbix_tools.py requirements.txt; do
   install -o "$SERVICE_USER" -g "$SERVICE_GROUP" -m 0644 "$SOURCE_DIR/$module" "$INSTALL_DIR/$module"
 done
