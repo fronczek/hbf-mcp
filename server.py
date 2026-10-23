@@ -179,7 +179,7 @@ _SECRET_NAME_RE = re.compile(
     re.IGNORECASE,
 )
 
-_SECRET_DIR_NAMES = {".ssh", ".gnupg", ".aws"}
+_SECRET_DIR_NAMES = {".ssh", ".gnupg", ".aws", ".credentials"}
 
 
 def resolve_path(path: str | None) -> Path:
@@ -209,7 +209,7 @@ def is_secret_path(path: Path) -> bool:
 
     Every path component is checked, not just the file name, so a credential
     stored as ``~/.ssh/id_ed25519_github`` or
-    ``~/credentials/influxdb.txt`` is still recognised.
+    ``~/.credentials/influxdb.txt`` is still recognised.
     """
     resolved = canonical(path)
     for part in resolved.parts:

@@ -61,11 +61,11 @@ def register_tools(mcp:Any)->None:
                 'runtime_sources_readable':source_readable,
                 'modules_on_disk':modules,
                 'credentials_configured':{
-                    'gitea':(HOME/'credentials/gitea.yml').is_file(),
-                    'youtrack':(HOME/'credentials/youtrack.yml').is_file(),
-                    'ese_browser':(HOME/'credentials/ese-browser.json').is_file(),
-                    'zabbix':(HOME/'credentials/zabbix.yml').is_file(),
-                    'influxdb':(HOME/'credentials/influxdb.yml').is_file()},
+                    'gitea':(HOME/'.credentials/gitea.yml').is_file(),
+                    'youtrack':(HOME/'.credentials/youtrack.yml').is_file(),
+                    'ese_browser':(HOME/'.credentials/ese-browser.json').is_file(),
+                    'zabbix':(HOME/'.credentials/zabbix.yml').is_file(),
+                    'influxdb':(HOME/'.credentials/influxdb.yml').is_file()},
                 'helpers_present':{
                     'dsh_api':(HOME/'bin/dsh-remote').is_file(),
                     'zabbix_watch':(HOME/'bin/zabbix-watch').is_file(),

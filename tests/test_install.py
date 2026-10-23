@@ -105,7 +105,7 @@ def test_no_arguments_only_lists_instances(tmp_path, installer):
 
 def test_upgrade_preserves_config_port_and_private_data(tmp_path, installer):
     source, run = installer
-    private_state = tmp_path / "homes/afronczek/credentials/synthetic.yml"
+    private_state = tmp_path / "homes/afronczek/.credentials/synthetic.yml"
     private_state.parent.mkdir(parents=True)
     private_state.write_text("synthetic: untouched\n")
     run("artur", "afronczek")
@@ -247,7 +247,7 @@ def test_legacy_migration_keeps_port_secrets_identity_and_masks_old_service(tmp_
     _, run = installer
     legacy, env, unit, _ = legacy_fixture(tmp_path)
     original = env.read_text()
-    state = tmp_path / "homes/gptagent/credentials/private.yml"
+    state = tmp_path / "homes/gptagent/.credentials/private.yml"
     state.parent.mkdir(parents=True)
     state.write_text("unchanged")
     run("artur", "gptagent", "--migrate-legacy")

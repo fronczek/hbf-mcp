@@ -16,7 +16,7 @@ from typing import Any
 
 from mcp.types import ToolAnnotations
 
-CREDENTIALS = Path(os.getenv("HBF_MCP_AGENT_HOME", "/home/gptagent")) / "credentials/youtrack.yml"
+CREDENTIALS = Path(os.getenv("HBF_MCP_AGENT_HOME", "/home/gptagent")) / ".credentials/youtrack.yml"
 ISSUE_ID = re.compile(r"^ESE-[1-9][0-9]{0,7}$")
 
 

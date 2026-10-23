@@ -19,7 +19,7 @@ Gitea (29):
 ## Safety
 
 These tools are typed HTTP REST operations; they never use the shell, SSH or the DSH host.
-GPT credentials are kept under /home/gptagent/credentials and never exposed to tool callers.
+GPT credentials are kept under /home/gptagent/.credentials and never exposed to tool callers.
 Gitea HTTPS origin is fixed to git.hbf.pl, no redirects, with exact repository allowlist.
 Default repositories: secnet/ese-agent, secnet/ese-backend, secnet/ese-frontend,
 secnet/ese-ansible, hbf/hbf-gpt-gitea, hbf/hbf-gpt-mailer,

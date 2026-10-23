@@ -15,7 +15,7 @@ from mcp.types import ToolAnnotations
 HOME=Path(os.getenv('HBF_MCP_AGENT_HOME', '/home/gptagent'))
 HELPER=HOME/'bin/dsh-remote'
 BROWSER=HOME/'projects/esekretariat/ese-agent/tools/browser'
-CONFIG=HOME/'credentials/ese-browser.json'
+CONFIG=HOME/'.credentials/ese-browser.json'
 ESE=re.compile(r'^ESE-[1-9][0-9]{0,6}$')
 
 

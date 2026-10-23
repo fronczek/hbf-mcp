@@ -394,6 +394,15 @@ def test_read_file_refuses_files_under_dot_ssh(sandbox):
         server.read_file(str(key))
 
 
+def test_read_file_refuses_files_in_a_dot_credentials_directory(sandbox):
+    creds = sandbox.allowed / ".credentials"
+    creds.mkdir()
+    token = creds / "influxdb.txt"
+    token.write_text("TOKEN", encoding="utf-8")
+    with pytest.raises(server.SecretAccessError):
+        server.read_file(str(token))
+
+
 def test_read_file_refuses_files_in_a_credentials_directory(sandbox):
     creds = sandbox.allowed / "credentials"
     creds.mkdir()
