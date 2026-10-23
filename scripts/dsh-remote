@@ -1,0 +1,509 @@
+#!/usr/bin/env python3
+import argparse
+import fcntl
+import http.cookiejar
+import json
+import os
+import ssl
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+from pathlib import Path
+
+BASE_URL = os.environ.get("DSH_REMOTE_URL", "https://dsh.hbf.pl").rstrip("/")
+CONFIG_HOME = Path.home() / ".config" / "dsh-remote"
+COOKIE_FILE = CONFIG_HOME / "cookies.txt"
+CREDENTIALS_DIR = Path(os.environ.get("HBF_CREDENTIALS_DIR", str(Path.home() / ".credentials"))).expanduser()
+DEFAULT_TOKEN_FILE = CREDENTIALS_DIR / "dsh-launch-token.txt"
+CA_FILE = Path(os.environ.get("DSH_REMOTE_CA", str(CONFIG_HOME / "caddy-root.crt")))
+BUDGET_BLOCK_FILE = Path.home() / ".local/state/dsh-budget-guard/start-block.json"
+
+
+def fail(msg, code=1):
+    print(f"dsh-remote: {msg}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def ssl_context():
+    if os.environ.get("DSH_REMOTE_INSECURE") == "1":
+        return ssl._create_unverified_context()
+    if CA_FILE.exists():
+        return ssl.create_default_context(cafile=str(CA_FILE))
+    return ssl.create_default_context()
+
+
+def jar(load=True):
+    CONFIG_HOME.mkdir(parents=True, exist_ok=True, mode=0o700)
+    cj = http.cookiejar.MozillaCookieJar(str(COOKIE_FILE))
+    if load and COOKIE_FILE.exists():
+        try:
+            cj.load(ignore_discard=True, ignore_expires=False)
+        except Exception as exc:
+            fail(f"cannot read cookie jar {COOKIE_FILE}: {exc}")
+    return cj
+
+
+def opener(cj):
+    return urllib.request.build_opener(
+        urllib.request.HTTPCookieProcessor(cj),
+        urllib.request.HTTPSHandler(context=ssl_context()),
+    )
+
+
+def bootstrap(token_file: Path):
+    if not token_file.exists():
+        fail(f"launch token file not found: {token_file}")
+    mode = token_file.stat().st_mode & 0o777
+    if mode & 0o077:
+        fail(f"refusing token file with permissions {mode:o}; run chmod 600 {token_file}")
+    token = token_file.read_text(encoding="utf-8").strip()
+    if not token:
+        fail("launch token file is empty")
+    cj = jar(load=False)
+    url = f"{BASE_URL}/?token={urllib.parse.quote(token, safe='')}"
+    req = urllib.request.Request(url, method="GET")
+    try:
+        with opener(cj).open(req, timeout=20) as resp:
+            resp.read(1)
+    except urllib.error.HTTPError as exc:
+        fail(f"bootstrap HTTP {exc.code}")
+    except urllib.error.URLError as exc:
+        if isinstance(exc.reason, ssl.SSLCertVerificationError):
+            fail(
+                f"TLS certificate is not trusted. Put the Caddy root CA at {CA_FILE} "
+                "or temporarily set DSH_REMOTE_INSECURE=1 for this internal endpoint."
+            )
+        fail(f"bootstrap failed: {exc.reason}")
+    if not list(cj):
+        fail("bootstrap returned no DSH browser-session cookie; token may be stale")
+    cj.save(ignore_discard=True, ignore_expires=False)
+    os.chmod(COOKIE_FILE, 0o600)
+    try:
+        token_file.unlink()
+    except OSError:
+        pass
+    print(f"DSH session cookie saved to {COOKIE_FILE}")
+
+
+def rpc(method, args):
+    if not COOKIE_FILE.exists():
+        fail("not authenticated; run: dsh-remote bootstrap")
+    cj = jar(load=True)
+    rpc_id = str(uuid.uuid4())
+    body = {
+        "type": "client-request",
+        "rpcId": rpc_id,
+        "method": method,
+        "payload": {"args": args},
+    }
+    req = urllib.request.Request(
+        f"{BASE_URL}/api/{method}",
+        data=json.dumps(body, separators=(",", ":")).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with opener(cj).open(req, timeout=60) as resp:
+            result = json.load(resp)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            fail("DSH cookie is missing/expired; bootstrap again with a fresh launch token")
+        fail(f"RPC {method} HTTP {exc.code}: {exc.read().decode('utf-8', 'replace')[:500]}")
+    except urllib.error.URLError as exc:
+        fail(f"RPC {method} failed: {exc.reason}")
+    if result.get("rpcId") != rpc_id:
+        fail(f"RPC id mismatch for {method}")
+    outcome = result.get("result", {})
+    if not outcome.get("ok"):
+        err = outcome.get("error", {})
+        fail(f"{method}: {err.get('code', 'remote-error')}: {err.get('message', err)}")
+    return outcome.get("value")
+
+
+def session_list():
+    return rpc("session/list", {"_request": {}})
+
+
+def print_sessions(raw=False, brief_limit=None):
+    value = session_list() or {}
+    if brief_limit is not None:
+        items = value.get("items", [])
+        ordered = sorted(items, key=lambda x: (bool(x.get("running")), str(x.get("updatedAt") or "")), reverse=True)
+        keys = ("sessionId", "running", "cwd", "updatedAt")
+        rows = [{k: item.get(k) for k in keys} for item in ordered[:brief_limit]]
+        print(json.dumps({"items": rows, "total": len(items), "has_more": len(items) > brief_limit}, separators=(",", ":")))
+        return
+    if raw:
+        print(json.dumps(value, ensure_ascii=False, indent=2))
+        return
+    items = value.get("items", [])
+    for item in items:
+        proj = item.get("projections") or {}
+        vals = proj.get("values") or {}
+        title = vals.get("title") or "(untitled)"
+        state = "RUN" if item.get("running") else "idle"
+        cwd = item.get("cwd") or "-"
+        print(f"{item.get('sessionId')}\t{state}\t{title}\t{cwd}")
+
+
+def new_session(cwd=None, session_id=None, workspace_id=None):
+    request = {}
+    if workspace_id:
+        request["workspaceId"] = workspace_id
+    elif cwd:
+        # cwd alone creates an Ungrouped session in DSH. Resolve/register the
+        # workspace first, then create/adopt the session by workspace identity.
+        resolved = rpc("workspace/create", {"request": {"path": cwd}})
+        request["workspaceId"] = resolved["workspace"]["workspaceId"]
+    if session_id:
+        request["sessionId"] = session_id
+    value = rpc("session/create", {"request": request})
+    print(value["sessionId"])
+
+
+def cancel_session(session_id):
+    value = rpc("session/cancel", {"request": {"sessionId": session_id}}) or {}
+    if not value.get("accepted"):
+        fail(f"cancel not accepted for {session_id}")
+    print("accepted")
+
+
+def session_item(session_id):
+    for item in (session_list() or {}).get("items", []):
+        if item.get("sessionId") == session_id:
+            return item
+    return None
+
+
+def extract_text(value):
+    # DSH assistant/message shapes can evolve; prefer obvious text/content fields.
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        chunks = [extract_text(v) for v in value]
+        return "\n".join(x for x in chunks if x)
+    if isinstance(value, dict):
+        for key in ("text", "content", "message"):
+            if key in value:
+                text = extract_text(value[key])
+                if text:
+                    return text
+    return ""
+
+
+def last_answer(session_id):
+    item = session_item(session_id)
+    if item is None:
+        fail(f"session not found: {session_id}")
+    proj = item.get("projections") or {}
+    through = proj.get("asOfSeq")
+    if through is None:
+        value = rpc("session/projections", {"request": {"sessionId": session_id}})
+        through = (value or {}).get("asOfSeq")
+    if through is None:
+        fail("session has no durable events yet")
+    page = rpc("session/page", {"request": {
+        "address": {"kind": "session", "sessionId": session_id},
+        "throughSeq": through,
+        "maxMessages": 100,
+    }}) or {}
+    for record in reversed(page.get("records", [])):
+        event = record.get("event", {})
+        if event.get("type") == "assistant/message":
+            text = extract_text(event.get("data"))
+            if text:
+                print(text)
+                return
+    fail("no assistant/message found in recent history")
+
+
+def budget_preflight():
+    if os.environ.get("DSH_BUDGET_OVERRIDE") == "1":
+        return
+    if BUDGET_BLOCK_FILE.exists():
+        try:
+            info = json.loads(BUDGET_BLOCK_FILE.read_text(encoding="utf-8"))
+            reason = info.get("reason", "budget guard blocked new DeepSeek work")
+        except Exception:
+            reason = "budget guard blocked new DeepSeek work"
+        fail(f"budget guard: {reason}; set DSH_BUDGET_OVERRIDE=1 only for an explicit owner override")
+
+
+def prompt(session_id, text, wait=True, timeout=600, mode="queue"):
+    if mode == "queue":
+        budget_preflight()
+    rpc("session/prompt", {"request": {
+        "requestId": str(uuid.uuid4()),
+        "sessionId": session_id,
+        "mode": mode,
+        "content": [{"type": "text", "text": text}],
+        "clientTimeZone": "Europe/Warsaw",
+    }})
+    if not wait:
+        print("accepted")
+        return
+    deadline = time.monotonic() + timeout
+    saw_running = False
+    while time.monotonic() < deadline:
+        item = session_item(session_id)
+        if item is None:
+            fail(f"session disappeared: {session_id}")
+        if item.get("running"):
+            saw_running = True
+        elif saw_running or not item.get("blank"):
+            # Give persistence/projection one small beat after the run settles.
+            time.sleep(0.5)
+            last_answer(session_id)
+            return
+        time.sleep(1)
+    fail(f"timeout waiting for session {session_id}")
+
+
+
+# DeepSeek Flash official Oct 2026 USD rates per 1M tokens (miss, hit, output).
+FLASH_OFFPEAK = (0.15, 0.003, 0.60)
+FLASH_PEAK = (0.30, 0.006, 1.20)
+FLASH_ID = {"provider": "deepseek-official", "model": "deepseek-flash"}
+
+
+def profile_default():
+    """Read the effective WebUI default and revision over authenticated DSH RPC.
+
+    settings/describe returns a redacted settings view, including the live
+    agent-default-model value and its configuration revision. No SSH,
+    filesystem reads on DSH, or credentials are needed.
+    """
+    view = rpc("settings/describe", {})
+    namespaces = (view or {}).get("namespaces")
+    if not isinstance(namespaces, list):
+        raise RuntimeError("DSH settings/describe did not return namespaces")
+    matches = [entry for entry in namespaces
+               if isinstance(entry, dict) and entry.get("ns") == "agent-default-model"]
+    if len(matches) != 1:
+        raise RuntimeError("DSH model default setting is missing or ambiguous")
+    entry = matches[0]
+    raw = entry.get("value")
+    revision = entry.get("revision")
+    if not isinstance(raw, dict) or not isinstance(revision, int) or revision < 0:
+        raise RuntimeError("DSH model default or revision is invalid")
+    result = {key: raw[key] for key in ("provider", "model", "reasoningEffort")
+              if key in raw}
+    if any(not isinstance(v, str) or not v for v in result.values()):
+        raise RuntimeError("DSH model default contains invalid values")
+    if not result.get("provider") or not result.get("model"):
+        raise RuntimeError("DSH model default has no provider or model")
+    return result, revision
+
+
+def select_model(session_id, selection):
+    v = rpc("session/selectModel", {"request": {"sessionId": session_id, **selection}})
+    selected = (v or {}).get("selected") or {}
+    if any(selected.get(k) != val for k, val in selection.items()):
+        raise RuntimeError(f"model selection was not accepted for {session_id}")
+
+
+def await_default(expected, after_revision=None, timeout=18):
+    """Wait for an async settings save, not merely a matching cached value.
+
+    Checking that revision advanced prevents accepting the original model
+    before the pending Flash-then-restore settings saves actually settle.
+    """
+    deadline = time.monotonic() + timeout
+    matched = 0
+    observed = None
+    while time.monotonic() < deadline:
+        observed, revision = profile_default()
+        changed = after_revision is None or revision > after_revision
+        matched = matched + 1 if observed == expected and changed else 0
+        if matched >= 2:
+            return revision
+        time.sleep(0.35)
+    raise RuntimeError(
+        "DSH default model did not reach the expected setting/revision "
+        f"(expected={expected}, saw={observed}); task NOT started"
+    )
+
+
+def flash_estimate(usage, rates):
+    miss, hit, out = rates
+    return (usage.get("uncachedInputTokens", 0)*miss +
+            usage.get("cacheReadTokens", 0)*hit +
+            usage.get("outputTokens", 0)*out) / 1_000_000
+
+
+def flash_dispatch(task, cwd, timeout=180, max_usd=1.00, effort="low", allow_concurrent=False, warn_usd=0.50):
+    """Dispatch directly to Flash, restoring default BEFORE any model request."""
+    if not task.strip():
+        fail("flash requires a task")
+    if not 10 <= timeout <= 3600 or max_usd <= 0 or warn_usd <= 0:
+        fail("timeout must be 10..3600 seconds; max-usd and warn-usd must be positive")
+    # Preserve sensible warnings for callers specifying a smaller per-task cap.
+    effective_warn_usd = min(warn_usd, max_usd / 2)
+    budget_preflight()
+    if not allow_concurrent:
+        active = [entry.get("sessionId") for entry in (session_list().get("items") or [])
+                  if entry.get("running") and entry.get("cwd") == cwd]
+        if active:
+            fail("DSH workspace already has running sessions: " + ", ".join(active[:4])
+                 + "; use --allow-concurrent only after checking their scope")
+    CONFIG_HOME.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with (CONFIG_HOME/"flash.lock").open("a+") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            fail("another Flash selection is running on this bridge")
+        original, initial_revision = profile_default()
+        wid = rpc("workspace/create", {"request": {"path": cwd}})["workspace"]["workspaceId"]
+        # Keep separate session-local model selection for the task and for the
+        # global default restoration. Never revert the Flash task session.
+        restorer = "gpt-flash-default-restorer"
+        rpc("session/create", {"request": {"workspaceId": wid, "sessionId": restorer}})
+        sid = rpc("session/create", {"request": {"workspaceId": wid}})["sessionId"]
+        print(f"session: {sid}", flush=True)
+        flash_revision = None
+        try:
+            select_model(sid, {**FLASH_ID, "reasoningEffort": effort})
+            # Confirm the Flash default save actually landed before restoring.
+            flash_revision = await_default(
+                {**FLASH_ID, "reasoningEffort": effort}, after_revision=initial_revision)
+        finally:
+            # The request above can change the global default even when its
+            # result times out; restore on any outcome, before sending the task.
+            select_model(restorer, original)
+            await_default(
+                original,
+                after_revision=flash_revision if flash_revision is not None else initial_revision)
+        item = session_item(sid)
+        model = (((item or {}).get("projections") or {}).get("values") or {}).get("modelSelection") or {}
+        if (model.get("next") or {}).get("model") != "deepseek-flash":
+            raise RuntimeError("Flash session lost model selection; refusing to start")
+        fcntl.flock(lock, fcntl.LOCK_UN)
+    budget_preflight()
+    rpc("session/prompt", {"request": {
+        "requestId": str(uuid.uuid4()), "sessionId": sid, "mode": "queue",
+        "content": [{"type": "text", "text": task}],
+        "clientTimeZone": "Europe/Warsaw",
+    }})
+    begin = time.monotonic()
+    stop_reason = None
+    warned = False
+    item = {}
+    try:
+        while time.monotonic() - begin < timeout:
+            time.sleep(1.5)
+            item = session_item(sid)
+            if item is None:
+                raise RuntimeError("DSH session disappeared")
+            values = (item.get("projections") or {}).get("values") or {}
+            usage = values.get("tokenUsage") or {}
+            current_peak_estimate = flash_estimate(usage, FLASH_PEAK)
+            if not warned and current_peak_estimate >= effective_warn_usd:
+                print(f"WARNING: Flash task peak-rate cost estimate reached USD "
+                      f"{current_peak_estimate:.4f} (warning USD {effective_warn_usd:.2f}; "
+                      f"stop USD {max_usd:.2f})", file=sys.stderr, flush=True)
+                warned = True
+            if current_peak_estimate >= max_usd:
+                stop_reason = f"soft spending limit USD {max_usd:.4f}"
+                break
+            used = (values.get("modelSelection") or {}).get("lastUsed") or {}
+            if not item.get("running") and used.get("model") == "deepseek-flash":
+                break
+        else:
+            stop_reason = f"timeout {timeout}s"
+    except KeyboardInterrupt:
+        stop_reason = "interrupted"
+    if stop_reason:
+        print(f"Stopping {sid}: {stop_reason}", file=sys.stderr)
+        try:
+            cancel_session(sid)
+        except SystemExit:
+            print("WARNING: cancellation was not acknowledged", file=sys.stderr)
+        for _ in range(10):
+            time.sleep(1)
+            item = session_item(sid)
+            if not item or not item.get("running"):
+                break
+    item = session_item(sid) or item or {}
+    values = (item.get("projections") or {}).get("values") or {}
+    used = (values.get("modelSelection") or {}).get("lastUsed") or {}
+    usage = values.get("tokenUsage") or {}
+    print(f"model used: {used.get('provider', '?')}/{used.get('model', '?')}")
+    print(f"tokens: uncached={usage.get('uncachedInputTokens', 0)}, "
+          f"cached={usage.get('cacheReadTokens', 0)}, output={usage.get('outputTokens', 0)}")
+    print(f"estimated USD cost: {flash_estimate(usage, FLASH_OFFPEAK):.6f} off-peak "
+          f"to {flash_estimate(usage, FLASH_PEAK):.6f} peak "
+          "(2026-10-20 published rates, not invoiced amount)")
+    print(f"session status: {'RUN' if item.get('running') else 'idle'}")
+    if stop_reason:
+        fail(f"{stop_reason}; inspect session {sid}", 124)
+    if item.get("running") or used.get("model") != "deepseek-flash":
+        fail(f"Flash completion unverified; inspect session {sid}")
+    print("---- assistant result ----")
+    last_answer(sid)
+
+
+def main():
+    p = argparse.ArgumentParser(description="Control the existing DSH web Harness through its authenticated session API")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    b = sub.add_parser("bootstrap", help="exchange one launch token for a persistent DSH cookie")
+    b.add_argument("--token-file", type=Path, default=DEFAULT_TOKEN_FILE)
+
+    s = sub.add_parser("sessions", help="list DSH web sessions")
+    s.add_argument("--json", action="store_true")
+    s.add_argument("--brief-limit", type=int, choices=range(1, 26), default=None)
+
+    n = sub.add_parser("new", help="create a DSH session")
+    location = n.add_mutually_exclusive_group()
+    location.add_argument("--cwd", help="resolve/register this directory as a DSH workspace")
+    location.add_argument("--workspace-id", help="use an existing DSH workspace identity")
+    n.add_argument("--id")
+
+    pr = sub.add_parser("prompt", help="send a prompt to an existing DSH session")
+    pr.add_argument("session_id")
+    pr.add_argument("prompt", nargs="+")
+    pr.add_argument("--no-wait", action="store_true")
+    pr.add_argument("--timeout", type=int, default=600)
+    pr.add_argument("--mode", choices=["queue", "steer"], default="queue")
+
+    ca = sub.add_parser("cancel", help="cancel the running turn in a session")
+    ca.add_argument("session_id")
+
+    fl = sub.add_parser("flash", help="run one bounded DSH Flash task without Pro")
+    fl.add_argument("task", nargs="+", help="text or - for stdin")
+    fl.add_argument("--cwd", default="/home/afronczek/esekretariat")
+    fl.add_argument("--timeout", type=int, default=180)
+    fl.add_argument("--max-usd", type=float, default=1.00,
+                    help="per-task SOFT peak-price stop (default $1.00), not a billing hard limit")
+    fl.add_argument("--warn-usd", type=float, default=0.50,
+                    help="per-task warning at peak-price estimate (default $0.50); no stop")
+    fl.add_argument("--effort", choices=["low", "medium", "high"], default="low")
+    fl.add_argument("--allow-concurrent", action="store_true",
+                    help="allow other running DSH sessions in the same workspace")
+
+    la = sub.add_parser("last", help="print the latest assistant answer from a session")
+    la.add_argument("session_id")
+
+    args = p.parse_args()
+    if args.cmd == "bootstrap": bootstrap(args.token_file)
+    elif args.cmd == "sessions": print_sessions(args.json, args.brief_limit)
+    elif args.cmd == "new": new_session(args.cwd, args.id, args.workspace_id)
+    elif args.cmd == "prompt": prompt(args.session_id, " ".join(args.prompt), not args.no_wait, args.timeout, args.mode)
+    elif args.cmd == "cancel": cancel_session(args.session_id)
+    elif args.cmd == "flash":
+        body = sys.stdin.read(12001) if args.task == ["-"] else " ".join(args.task)
+        if len(body) > 12000:
+            fail("task exceeds 12000 characters: use a tracked brief")
+        try:
+            flash_dispatch(body, args.cwd, args.timeout, args.max_usd, args.effort,
+                           args.allow_concurrent, args.warn_usd)
+        except RuntimeError as exc:
+            fail(str(exc))
+    elif args.cmd == "last": last_answer(args.session_id)
+
+
+if __name__ == "__main__":
+    main()
