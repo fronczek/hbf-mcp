@@ -128,6 +128,44 @@ class ClientsTest(unittest.TestCase):
                 api.create_pull_request("hbf/hbf-api-tools", "title", "head", "master", "body")
         self.assertEqual(calls.call_count, 1)
 
+    def test_close_integrated_records_attribution_without_git_merge(self):
+        api = Gitea()
+        head, merge = "a" * 40, "b" * 40
+        calls = [
+            {"login": "gpt"},
+            {"state": "open", "merged": False,
+             "head": {"sha": head}, "base": {"ref": "master"}},
+            {"commit": {"id": merge}},
+            {"parents": [{"sha": "c" * 40}, {"sha": head}]},
+            {"state": "success", "sha": head, "statuses": []},
+            {"id": "comment"}, {"state": "closed"},
+            {"state": "closed", "merged": False},
+        ]
+        with patch.object(api, "_call", side_effect=calls) as mocked:
+            result = api.close_integrated_pr("hbf/hbf-api-tools", 3,
+                                             expected_head_sha=head, merge_commit_sha=merge)
+        self.assertTrue(result["merged_in_git"])
+        self.assertEqual(result["gitea_state"], "closed")
+        self.assertFalse(result["gitea_merged_flag"])
+        self.assertIn("added by gpt-lindir", mocked.call_args_list[5].kwargs["payload"]["body"])
+        self.assertEqual(mocked.call_args_list[6].kwargs["method"], "PATCH")
+        self.assertEqual(mocked.call_args_list[6].kwargs["payload"], {"state": "closed"})
+
+    def test_close_integrated_wrong_parent_has_no_write(self):
+        api = Gitea()
+        head, merge = "a" * 40, "b" * 40
+        with patch.object(api, "_call", side_effect=[
+            {"login": "gpt"},
+            {"state": "open", "merged": False,
+             "head": {"sha": head}, "base": {"ref": "master"}},
+            {"commit": {"id": merge}},
+            {"parents": [{"sha": "c" * 40}, {"sha": "d" * 40}]},
+        ]) as mocked:
+            with self.assertRaisesRegex(RuntimeError, "second parent"):
+                api.close_integrated_pr("hbf/hbf-api-tools", 3,
+                                        expected_head_sha=head, merge_commit_sha=merge)
+        self.assertEqual(mocked.call_count, 4)
+
     def test_manually_merged_pr_checks_head_master_parents_and_ci(self):
         api = Gitea()
         head, merge = "a" * 40, "b" * 40

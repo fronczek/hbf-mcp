@@ -183,6 +183,60 @@ class Gitea:
         return {"number": number, "merged": True, "already_merged": False,
                 "merge_commit_sha": merge_commit_sha}
 
+    def close_integrated_pr(self, repo: str, number: int, *,
+                            expected_head_sha: str, merge_commit_sha: str,
+                            dsh_tier: str | None = None) -> dict:
+        """Close a PR after signed Git merge when Gitea disables manual-merge marking.
+
+        NOT a Gitea `merged` status: post an audit explanation first, then close.
+        Never call this for a PR not present as the direct second parent of the
+        current remote master. Does not mutate any source code or merge itself.
+        """
+        if number < 1 or not all(re.fullmatch(r"[a-f0-9]{40}", x)
+                                  for x in (expected_head_sha, merge_commit_sha)):
+            raise ValueError("A PR number and two exact SHA-1 commit IDs are required")
+        actor = self._confirm_agent()
+        if actor == "dsh" and dsh_tier not in {"dsh-pro", "dsh-flash"}:
+            raise ValueError("DSH must explicitly identify the model tier")
+        if actor == "gpt" and dsh_tier is not None:
+            raise ValueError("GPT must not claim a DSH model tier")
+        pr = self.pull_request(repo, number)
+        if pr.get("merged") is True:
+            return {"number": number, "already_merged": True, "merged_in_git": True}
+        if (pr.get("state") != "open"
+                or (pr.get("head") or {}).get("sha") != expected_head_sha
+                or (pr.get("base") or {}).get("ref") != "master"):
+            raise RuntimeError("PR state, expected head or base has changed; refusing")
+        tip = self._call(self._repo(repo) + "/branches/master")
+        if (tip.get("commit") or {}).get("id") != merge_commit_sha:
+            raise RuntimeError("Signed merge is not the current remote master HEAD")
+        commit = self._call(self._repo(repo) + "/git/commits/" + merge_commit_sha)
+        parents = [parent.get("sha") for parent in commit.get("parents", [])]
+        if len(parents) != 2 or parents[1] != expected_head_sha:
+            raise RuntimeError("PR head is not the second parent of this manual merge")
+        if self.commit_status(repo, expected_head_sha).get("state") != "success":
+            raise RuntimeError("PR HEAD CI is not green")
+
+        audit = ("Code was integrated into master by an independently signed Git merge "
+                 f"{merge_commit_sha} (exact PR head: {expected_head_sha}). "
+                 "This repository currently disables Gitea's manually-merged status "
+                 "endpoint (HTTP 405), so this PR is closed as administrative cleanup "
+                 "rather than marked merged by Gitea. No additional code merge is needed.")
+        if actor == "dsh":
+            audit += f"\n\nadded by {dsh_tier}"
+        audit = add_attribution(audit, actor)
+        self._call(self._repo(repo) + f"/issues/{number}/comments", method="POST",
+                   payload={"body": audit})
+        # If either request is ambiguous, inspect remotely before considering a retry.
+        self._call(self._repo(repo) + f"/pulls/{number}", method="PATCH",
+                   payload={"state": "closed"})
+        updated = self.pull_request(repo, number)
+        if updated.get("state") != "closed":
+            raise RuntimeError("Gitea did not confirm close; inspect before retrying")
+        return {"number": number, "merged_in_git": True,
+                "gitea_state": "closed", "gitea_merged_flag": bool(updated.get("merged")),
+                "merge_commit_sha": merge_commit_sha}
+
     def commit_status(self, repo: str, ref: str):
         if not re.fullmatch(r"[A-Fa-f0-9]{7,64}|[A-Za-z0-9._/-]{1,150}", ref) or ".." in ref:
             raise ValueError("Invalid commit/ref")
