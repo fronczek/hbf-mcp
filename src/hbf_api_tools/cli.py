@@ -44,6 +44,11 @@ def _parser() -> argparse.ArgumentParser:
     create.add_argument("repo"); create.add_argument("--title", required=True)
     create.add_argument("--head", required=True); create.add_argument("--base", default="master")
     create.add_argument("--apply", action="store_true", help="confirm external write")
+    merge = gt.add_parser("merge-pr", help="merge an open master PR after exact-head CI checks")
+    merge.add_argument("repo"); merge.add_argument("number", type=int)
+    merge.add_argument("--head-sha", required=True, help="expected full PR head SHA")
+    merge.add_argument("--keep-branch", action="store_true", help="keep the source branch after merge")
+    merge.add_argument("--apply", action="store_true", help="confirm external write")
 
     ds = groups.add_parser("dsh", help="Bounded DeepSeek Harness operations").add_subparsers(dest="op", required=True)
     sessions = ds.add_parser("sessions"); sessions.add_argument("--limit", type=int, default=10)
@@ -78,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
             elif args.op == "comments": result = api.comments(args.issue_id, args.limit)
             elif args.op == "add-comment": result = api.add_comment(args.issue_id, sys.stdin.read(10_001))
         elif args.service == "gitea":
-            if args.op in {"create-pr", "mark-merged", "close-integrated"} and not args.apply:
+            if args.op in {"create-pr", "mark-merged", "close-integrated", "merge-pr"} and not args.apply:
                 raise ValueError("Write not sent; repeat with --apply to confirm")
             api = Gitea()
             if args.op == "connection": result = api.connection()
@@ -91,6 +96,9 @@ def main(argv: list[str] | None = None) -> int:
             elif args.op == "create-pr":
                 result = api.create_pull_request(args.repo, args.title, args.head, args.base,
                                                  sys.stdin.read(20_001))
+            elif args.op == "merge-pr":
+                result = api.merge_pull_request(args.repo, args.number, args.head_sha,
+                                                delete_branch=not args.keep_branch)
             elif args.op == "mark-merged":
                 result = api.mark_manually_merged(args.repo, args.number,
                                                   expected_head_sha=args.head,

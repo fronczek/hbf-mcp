@@ -299,6 +299,72 @@ class ClientsTest(unittest.TestCase):
         self.assertTrue(result["existing"])
         self.assertEqual(call.call_count, 2)
 
+    def test_merge_pr_checks_exact_head_and_all_statuses_then_fast_forwards(self):
+        api = Gitea()
+        head = "a" * 40
+        pr = {"state": "open", "merged": False, "mergeable": True,
+              "head": {"sha": head}, "base": {"ref": "master"}}
+        statuses = {"state": "success", "total_count": 2, "statuses_truncated": False,
+                    "statuses": [{"status": "success"}, {"status": "success"}]}
+        merged = {"state": "closed", "merged": True, "merged_commit_sha": head,
+                  "head": {"sha": head}, "base": {"ref": "master"}}
+        with patch.object(api, "_confirm_agent", return_value="gpt") as confirm, patch.object(
+                api, "_call", side_effect=[pr, statuses, {}, merged]) as call:
+            result = api.merge_pull_request("secnet/ese-backend", 28, head)
+        confirm.assert_called_once_with()
+        self.assertTrue(result["merged"])
+        self.assertFalse(result["already_merged"])
+        self.assertEqual(result["merge_commit_sha"], head)
+        post = call.call_args_list[2]
+        self.assertEqual(post.args[0], "/repos/secnet/ese-backend/pulls/28/merge")
+        self.assertEqual(post.kwargs["method"], "POST")
+        self.assertEqual(post.kwargs["payload"], {
+            "do": "fast-forward-only", "head_commit_id": head,
+            "delete_branch_after_merge": True,
+        })
+
+    def test_merge_pr_refuses_stale_head_without_mutation(self):
+        api = Gitea()
+        with patch.object(api, "_confirm_agent", return_value="gpt"), patch.object(
+                api, "_call", return_value={"state": "open", "head": {"sha": "b" * 40},
+                                            "base": {"ref": "master"}}) as call:
+            with self.assertRaisesRegex(ValueError, "head changed"):
+                api.merge_pull_request("secnet/ese-backend", 28, "a" * 40)
+        self.assertEqual(call.call_count, 1)
+
+    def test_merge_pr_refuses_pending_or_truncated_checks(self):
+        api = Gitea()
+        head = "a" * 40
+        pr = {"state": "open", "merged": False, "mergeable": True,
+              "head": {"sha": head}, "base": {"ref": "master"}}
+        for status in (
+            {"state": "pending", "total_count": 1, "statuses_truncated": False,
+             "statuses": [{"status": "pending"}]},
+            {"state": "success", "total_count": 51, "statuses_truncated": True,
+             "statuses": [{"status": "success"}]},
+        ):
+            with patch.object(api, "_confirm_agent", return_value="gpt"), patch.object(
+                    api, "_call", side_effect=[pr, status]) as call:
+                with self.assertRaisesRegex(ValueError, "Exact-head CI"):
+                    api.merge_pull_request("secnet/ese-backend", 28, head)
+            self.assertEqual(call.call_count, 2)
+
+    def test_merge_pr_already_merged_is_idempotent(self):
+        api = Gitea()
+        head = "a" * 40
+        merged = {"state": "closed", "merged": True, "merged_commit_sha": head,
+                  "head": {"sha": head}, "base": {"ref": "master"}}
+        with patch.object(api, "_confirm_agent", return_value="gpt"), patch.object(api, "_call", return_value=merged) as call:
+            result = api.merge_pull_request("secnet/ese-backend", 28, head)
+        self.assertTrue(result["already_merged"])
+        self.assertEqual(call.call_count, 1)
+
+    def test_cli_merge_without_apply_does_not_load_credentials(self):
+        with patch("hbf_api_tools.cli.Gitea", side_effect=AssertionError("must not load")):
+            with redirect_stderr(io.StringIO()):
+                self.assertEqual(main(["gitea", "merge-pr", "secnet/ese-backend", "28",
+                                       "--head-sha", "a" * 40]), 2)
+
     def test_cli_pr_without_apply_does_not_load_credentials(self):
         with patch("hbf_api_tools.cli.Gitea", side_effect=AssertionError("must not load")):
             with redirect_stderr(io.StringIO()):

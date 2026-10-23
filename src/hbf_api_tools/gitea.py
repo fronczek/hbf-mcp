@@ -237,6 +237,47 @@ class Gitea:
                 "gitea_state": "closed", "gitea_merged_flag": bool(updated.get("merged")),
                 "merge_commit_sha": merge_commit_sha}
 
+    def merge_pull_request(self, repo: str, number: int, expected_head_sha: str,
+                           delete_branch: bool = True) -> dict:
+        if number < 1:
+            raise ValueError("PR number must be positive")
+        if not re.fullmatch(r"[A-Fa-f0-9]{40}", expected_head_sha):
+            raise ValueError("Expected PR head must be a full 40-character SHA")
+        route = self._repo(repo)
+        self._confirm_agent()
+        pr = self.pull_request(repo, number)
+        head = pr.get("head") or {}
+        if head.get("sha") != expected_head_sha:
+            raise ValueError("PR head changed; refusing to merge")
+        if (pr.get("base") or {}).get("ref") != "master":
+            raise ValueError("Only PRs targeting master can be merged by this operation")
+        if pr.get("merged") is True:
+            return {"merged": True, "already_merged": True,
+                    "number": number, "head_sha": expected_head_sha,
+                    "merge_commit_sha": pr.get("merged_commit_sha")}
+        if pr.get("state") != "open":
+            raise ValueError("PR is not open")
+        if pr.get("mergeable") is not True:
+            raise ValueError("PR is not confirmed mergeable")
+        status = self.commit_status(repo, expected_head_sha)
+        statuses = status.get("statuses") or []
+        if (status.get("state") != "success" or not statuses
+                or status.get("statuses_truncated")
+                or len(statuses) != status.get("total_count")
+                or any(item.get("status") != "success" for item in statuses)):
+            raise ValueError("Exact-head CI is not fully successful; refusing to merge")
+        result = self._call(route + f"/pulls/{number}/merge", method="POST", payload={
+            "do": "fast-forward-only",
+            "head_commit_id": expected_head_sha,
+            "delete_branch_after_merge": bool(delete_branch),
+        })
+        merged = self.pull_request(repo, number)
+        if (merged.get("merged") is not True
+                or (merged.get("head") or {}).get("sha") != expected_head_sha):
+            raise RuntimeError("Gitea did not confirm the expected PR merge")
+        return {"merged": True, "already_merged": False, "number": number,
+                "head_sha": expected_head_sha, "merge_commit_sha": merged.get("merged_commit_sha")}
+
     def commit_status(self, repo: str, ref: str):
         if not re.fullmatch(r"[A-Fa-f0-9]{7,64}|[A-Za-z0-9._/-]{1,150}", ref) or ".." in ref:
             raise ValueError("Invalid commit/ref")
