@@ -128,6 +128,42 @@ class ClientsTest(unittest.TestCase):
                 api.create_pull_request("hbf/hbf-api-tools", "title", "head", "master", "body")
         self.assertEqual(calls.call_count, 1)
 
+    def test_manually_merged_pr_checks_head_master_parents_and_ci(self):
+        api = Gitea()
+        head, merge = "a" * 40, "b" * 40
+        pr = {"state": "open", "merged": False,
+              "head": {"sha": head}, "base": {"ref": "master"}}
+        closed = {"state": "closed", "merged": True}
+        checks = [
+            {"login": "gpt"}, pr, {"commit": {"id": merge}},
+            {"parents": [{"sha": "c" * 40}, {"sha": head}]},
+            {"state": "success", "sha": head, "statuses": []},
+            {}, closed,
+        ]
+        with patch.object(api, "_call", side_effect=checks) as mocked:
+            result = api.mark_manually_merged("hbf/hbf-api-tools", 3,
+                                             expected_head_sha=head, merge_commit_sha=merge)
+        self.assertTrue(result["merged"])
+        post = mocked.call_args_list[5]
+        self.assertEqual(post.kwargs["method"], "POST")
+        self.assertEqual(post.kwargs["payload"]["Do"], "manually-merged")
+        self.assertEqual(post.kwargs["payload"]["MergeCommitID"], merge)
+
+    def test_manual_merge_rejects_wrong_parent_before_write(self):
+        api = Gitea()
+        head, merge = "a" * 40, "b" * 40
+        with patch.object(api, "_call", side_effect=[
+            {"login": "gpt"},
+            {"state": "open", "merged": False,
+             "head": {"sha": head}, "base": {"ref": "master"}},
+            {"commit": {"id": merge}},
+            {"parents": [{"sha": "c" * 40}, {"sha": "d" * 40}]},
+        ]) as mocked:
+            with self.assertRaisesRegex(RuntimeError, "second parent"):
+                api.mark_manually_merged("hbf/hbf-api-tools", 3,
+                                         expected_head_sha=head, merge_commit_sha=merge)
+        self.assertEqual(mocked.call_count, 4)
+
     def test_comment_and_pr_have_agent_footer(self):
         api = YouTrack()
         with patch.object(youtrack_module, "request_json", side_effect=[
