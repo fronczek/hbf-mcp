@@ -61,6 +61,36 @@ class YouTrack:
             raise ConfigurationError("Refusing YouTrack mutation: token does not match local agent identity")
         return actor
 
+    def set_state(self, issue_id: str, state: str) -> dict:
+        if not isinstance(state, str) or not 1 <= len(state.strip()) <= 100:
+            raise ValueError("State must contain 1..100 characters")
+        state = state.strip()
+        actor = self._confirm_agent()
+        route = self._issue(issue_id)
+        fields = "id,idReadable,customFields(name,$type,value(name,$type))"
+        current = request_json(self.base, route, self.token, query={"fields": fields})
+        matches = [field for field in current.get("customFields", [])
+                   if field.get("name") == "State"]
+        if len(matches) != 1 or matches[0].get("$type") != "StateIssueCustomField":
+            raise ValueError("Issue does not expose one directly writable State field")
+        current_state = (matches[0].get("value") or {}).get("name")
+        if current_state == state:
+            return {"id": current.get("idReadable", issue_id),
+                    "state": state, "changed": False, "author": actor}
+        result = request_json(self.base, route, self.token, method="POST",
+                              payload={"customFields": [{
+                                  "name": "State",
+                                  "$type": "StateIssueCustomField",
+                                  "value": {"name": state, "$type": "StateBundleElement"},
+                              }]},
+                              query={"fields": fields})
+        updated = [field for field in result.get("customFields", [])
+                   if field.get("name") == "State"]
+        if len(updated) != 1 or (updated[0].get("value") or {}).get("name") != state:
+            raise RuntimeError("YouTrack did not confirm the requested state")
+        return {"id": result.get("idReadable", current.get("idReadable", issue_id)),
+                "state": state, "changed": True, "author": actor}
+
     def add_comment(self, issue_id: str, text: str):
         text = text.strip()
         if not 1 <= len(text) <= 10_000:

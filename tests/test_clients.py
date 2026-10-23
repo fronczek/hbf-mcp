@@ -387,6 +387,74 @@ class ClientsTest(unittest.TestCase):
             with redirect_stderr(io.StringIO()):
                 self.assertEqual(main(["youtrack", "add-comment", "ESE-1"]), 2)
 
+    def test_set_state_updates_direct_state_field_and_verifies(self):
+        api = YouTrack()
+        current = {"idReadable": "ESE-812", "customFields": [{
+            "name": "State", "$type": "StateIssueCustomField",
+            "value": {"name": "In Progress", "$type": "StateBundleElement"},
+        }]}
+        updated = {"idReadable": "ESE-812", "customFields": [{
+            "name": "State", "$type": "StateIssueCustomField",
+            "value": {"name": "Resolved", "$type": "StateBundleElement"},
+        }]}
+        with patch.object(youtrack_module, "request_json",
+                          side_effect=[{"login": "gpt"}, current, updated]) as call:
+            result = api.set_state("ESE-812", "Resolved")
+        self.assertEqual(result, {"id": "ESE-812", "state": "Resolved",
+                                  "changed": True, "author": "gpt"})
+        self.assertEqual(call.call_count, 3)
+        self.assertEqual(call.call_args_list[2].kwargs["method"], "POST")
+        self.assertEqual(call.call_args_list[2].kwargs["payload"], {
+            "customFields": [{
+                "name": "State", "$type": "StateIssueCustomField",
+                "value": {"name": "Resolved", "$type": "StateBundleElement"},
+            }]
+        })
+
+    def test_set_state_refuses_state_machine_fields(self):
+        api = YouTrack()
+        issue = {"idReadable": "ESE-812", "customFields": [{
+            "name": "State", "$type": "StateMachineIssueCustomField",
+            "value": {"name": "In Progress"},
+        }]}
+        with patch.object(youtrack_module, "request_json",
+                          side_effect=[{"login": "gpt"}, issue]) as call:
+            with self.assertRaisesRegex(ValueError, "directly writable State"):
+                api.set_state("ESE-812", "Resolved")
+        self.assertEqual(call.call_count, 2)
+
+    def test_set_state_repeating_current_value_is_noop(self):
+        api = YouTrack()
+        issue = {"idReadable": "ESE-812", "customFields": [{
+            "name": "State", "$type": "StateIssueCustomField",
+            "value": {"name": "Resolved"},
+        }]}
+        with patch.object(youtrack_module, "request_json",
+                          side_effect=[{"login": "gpt"}, issue]) as call:
+            result = api.set_state("ESE-812", "Resolved")
+        self.assertFalse(result["changed"])
+        self.assertEqual(call.call_count, 2)
+
+    def test_set_state_verifies_response(self):
+        api = YouTrack()
+        current = {"idReadable": "ESE-812", "customFields": [{
+            "name": "State", "$type": "StateIssueCustomField",
+            "value": {"name": "In Progress"},
+        }]}
+        mismatched = {"idReadable": "ESE-812", "customFields": [{
+            "name": "State", "$type": "StateIssueCustomField",
+            "value": {"name": "In Progress"},
+        }]}
+        with patch.object(youtrack_module, "request_json",
+                          side_effect=[{"login": "gpt"}, current, mismatched]):
+            with self.assertRaisesRegex(RuntimeError, "did not confirm"):
+                api.set_state("ESE-812", "Resolved")
+
+    def test_cli_set_state_without_apply_does_not_load_credentials(self):
+        with patch("hbf_api_tools.cli.YouTrack", side_effect=AssertionError("must not load")):
+            with redirect_stderr(io.StringIO()):
+                self.assertEqual(main(["youtrack", "set-state", "ESE-812", "Resolved"]), 2)
+
     def test_youtrack_write_requires_gpt_identity(self):
         api = YouTrack()
         with patch.object(youtrack_module, "request_json", return_value={"login": "owner"}) as call:

@@ -20,6 +20,9 @@ def _parser() -> argparse.ArgumentParser:
     c = yt.add_parser("comments"); c.add_argument("issue_id"); c.add_argument("--limit", type=int, default=20)
     a = yt.add_parser("add-comment", help="read comment text from stdin")
     a.add_argument("issue_id"); a.add_argument("--apply", action="store_true", help="confirm external write")
+    state = yt.add_parser("set-state", help="set a directly writable State field")
+    state.add_argument("issue_id"); state.add_argument("state")
+    state.add_argument("--apply", action="store_true", help="confirm external write")
 
     gt = groups.add_parser("gitea", help="Gitea repository operations").add_subparsers(dest="op", required=True)
     gt.add_parser("connection")
@@ -75,13 +78,14 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         if args.service == "youtrack":
-            if args.op == "add-comment" and not args.apply:
+            if args.op in {"add-comment", "set-state"} and not args.apply:
                 raise ValueError("Write not sent; repeat with --apply to confirm")
             api = YouTrack()
             if args.op == "search": result = api.search(args.query, args.limit, args.skip)
             elif args.op == "issue": result = api.issue(args.issue_id)
             elif args.op == "comments": result = api.comments(args.issue_id, args.limit)
             elif args.op == "add-comment": result = api.add_comment(args.issue_id, sys.stdin.read(10_001))
+            elif args.op == "set-state": result = api.set_state(args.issue_id, args.state)
         elif args.service == "gitea":
             if args.op in {"create-pr", "mark-merged", "close-integrated", "merge-pr"} and not args.apply:
                 raise ValueError("Write not sent; repeat with --apply to confirm")
