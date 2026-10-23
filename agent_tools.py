@@ -22,6 +22,8 @@ ESE=re.compile(r'^ESE-[1-9][0-9]{0,6}$')
 def _error_category(stderr: str) -> str:
     """Classify helper failure without returning potentially sensitive stderr."""
     lower = stderr.lower()
+    if any(term in lower for term in ("budget guard", "balance check failed", "insufficient balance")):
+        return "budget_guard"
     if any(term in lower for term in ("401", "403", "unauthorized", "forbidden")):
         return "authentication"
     if any(term in lower for term in ("timeout", "timed out")):
@@ -83,15 +85,30 @@ def register_tools(mcp:Any)->None:
                 'Follow AGENTS.md and existing repository/project rules. '
                 'Do not use GPT credentials, SSH into MCP01 or other hosts, or access another agent identity. '
                 'Report changed files, tests, commits, and blockers succinctly.\n\n'+task)
-        raw=_run([str(HELPER),'flash','-','--cwd','/home/afronczek/esekretariat',
-                  '--timeout',str(timeout_seconds),'--max-usd',str(max_usd),
-                  '--effort','low'],stdin=prompt,timeout=timeout_seconds+65)
+        try:
+            raw=_run([str(HELPER),'flash','-','--cwd','/home/afronczek/esekretariat',
+                      '--timeout',str(timeout_seconds),'--max-usd',str(max_usd),
+                      '--effort','low'],stdin=prompt,timeout=timeout_seconds+65)
+        except RuntimeError as exc:
+            message=str(exc)
+            lower=message.lower()
+            definitely_not_started=any(term in lower for term in (
+                'pinned helper is unavailable',
+                'stderr category: budget_guard',
+                'stderr category: authentication',
+                'stderr category: connectivity',
+                'stderr category: api_not_found',
+            ))
+            return {'issue':issue_id,
+                    'status':'not_started' if definitely_not_started else 'unknown',
+                    'error':message}
         session=re.search(r'^session:\s*(\S+)',raw,re.M)
         tokens=re.search(r'^tokens:\s*(.+)$',raw,re.M)
         usd=re.search(r'^estimated USD cost:\s*(.+)$',raw,re.M)
         marker='---- assistant result ----'
         answer=raw.split(marker,1)[-1].strip() if marker in raw else ''
-        return {'issue':issue_id,'session':session.group(1) if session else None,
+        return {'issue':issue_id,'status':'completed',
+                'session':session.group(1) if session else None,
                 'tokens':tokens.group(1) if tokens else None,
                 'cost_estimate':usd.group(1) if usd else None,
                 'result_excerpt':answer[-3000:],
