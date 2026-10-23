@@ -7,8 +7,11 @@ Client-independent command-line tools and Python clients for HBF APIs. This repo
 - API logic lives here; MCP or another AI-client adapter should be a thin caller, not a second implementation.
 - Tools use typed operations against fixed HBF service origins. No arbitrary URL, shell command, or SSH target is accepted.
 - Credentials are never printed, logged, or included in errors.
-- Credential directory resolution: `HBF_CREDENTIALS_DIR` if explicitly set; otherwise `.credentials` found by walking upward from the executable/repository location, then `~/.credentials`. The first existing directory wins. File permissions must not grant group/other access.
-- The checkout-relative search makes a workspace checkout work regardless of the caller's current directory. For installations outside the workspace, set `HBF_CREDENTIALS_DIR`.
+- Credential directory resolution: `~/.credentials` of the actual Unix user **only**, unless `HBF_CREDENTIALS_DIR` is explicitly set (primarily for tests). No checkout-relative searches and no fallback to `~/credentials`. The directory must be owned by the invoking user and private (`0700`); credential files must be regular, owned files (`0600`).
+- The private `~/.credentials/agent.yml` pins the expected agent login, allowed execution host, and Unix account; HBF API actions deny mismatches. Remote Gitea/YouTrack `/user` or `/me` identity checks deny a token for the owner or another agent, **including reads**. The host/Unix mapping is reviewed code, not CLI-controlled.
+- Identity is **not portable across agents**. Never use, copy, import, delegate, sign with or select another agent's Git/GPG wrappers, credentials, cookies, or working tree. A technical fallback cannot silently use the owner's connected OpenAI plugin identity.
+- All Gitea PR descriptions and YouTrack comments published by `gpt` receive `added by gpt-lindir` automatically. DSH actions require a caller-supplied `added by dsh-flash` or `added by dsh-pro` marker; the shared DSH token proves only the `dsh` ACCOUNT, not the model tier. Model selection needs separate Harness verification.
+- **Security limit:** because the current DSH Unix user historically has both agents' private keyrings, code-level checks are not a full access-control boundary against a process that can directly access foreign keys. Physically separate Unix accounts/keyrings and remove foreign wrappers in a separately approved DSH maintenance action. This repository does not touch the DSH host or its private keys.
 
 Credential contracts (flat YAML scalar keys; values remain local):
 
@@ -16,9 +19,21 @@ Credential contracts (flat YAML scalar keys; values remain local):
 |---|---|
 | `youtrack.yml` | `youtrack_url`, `youtrack_token_value` |
 | `gitea.yml` | `gitea_url`, `token_value` |
+| `agent.yml` | `agent_login`, `agent_host`, `agent_unix_user` (must match reviewed host binding) |
 | DSH helper | `HBF_DSH_HELPER` points to the installed `dsh-remote` HTTPS helper; its Harness auth remains private to that helper |
 | Zabbix monitoring | `zabbix.yml`: `zabbix_url`, `zabbix_token_value` |
 | Influx monitoring | `influxdb_<bucket>.yml`: `influx_url`, `influx_org`, `influx_bucket`, `influx_token` |
+
+Identity profiles (no tokens in this sample):
+
+```yaml
+# hbfplhmcpu01: /home/gptagent/.credentials/agent.yml, mode 0600
+agent_login: gpt
+agent_host: hbfplhmcpu01
+agent_unix_user: gptagent
+```
+
+The DSH-specific profile, provisioned by the owner **on DSH only**, uses `dsh`, `hbfplhdshu01` and `afronczek`. Never exchange credential files or signing helpers between these hosts. Automatic agent work and writes are limited to their bound hosts; owner-interactive plugin actions are distinct and must not masquerade as agent work.
 
 The first CLI surface is:
 
@@ -58,7 +73,7 @@ yt = YouTrack()
 issue = yt.issue("ESE-801")
 ```
 
-An MCP adapter should call these typed methods and expose only the operations it needs. Do not copy API logic into `hbf-mcp`. Set `HBF_CREDENTIALS_DIR` in the service environment if its installed package cannot find the machine-local `.credentials` directory by walking upward from its own package path. MCP server tools should mark reads and writes accurately and keep `--apply`-equivalent confirmation for mutations.
+An MCP adapter should call these typed methods and expose only the operations it needs. Do not copy API logic into `hbf-mcp`. Install the package under the intended agent Unix account and provide that account's private `~/.credentials`; set `HBF_CREDENTIALS_DIR` only for explicitly reviewed alternate installations and tests. MCP server tools should mark reads and writes accurately and keep `--apply`-equivalent confirmation for mutations.
 
 For shell-based clients, install into a dedicated virtual environment and approve only that environment's stable `hbf-api` executable prefix. The package does not and cannot override the client's command-approval policy.
 
@@ -69,8 +84,8 @@ For shell-based clients, install into a dedicated virtual environment and approv
 the YAML with `--config PATH` to add or tune named profiles without editing
 client code. It uses `safe_load`; profiles define selectors, windows, thresholds
 and supported rule types, never credentials or arbitrary API/Flux requests.
-Credentials stay in private `.credentials/zabbix.yml` and
-`.credentials/influxdb_<bucket>.yml` files; each Influx profile selects the
+Credentials stay in private `~/.credentials/zabbix.yml` and
+`~/.credentials/influxdb_<bucket>.yml` files; each Influx profile selects the
 credential file matching its bucket.
 
 The initial Zabbix profile selects `hbfplhpved*` hosts and CPU/NVMe temperature
