@@ -70,7 +70,7 @@ class GitWorkflowTests(unittest.TestCase):
     def test_stage_rejects_secret_before_running_git(self):
         fn=find('git_workflow_stage',git)
         with patch.object(git,'_git') as call:
-            for candidate in ('../keys','credentials/token.yml','.env.production','a/.ssh/id_rsa','a//b'):
+            for candidate in ('../keys','credentials/token.yml','.credentials/token.yml','.env.production','a/.ssh/id_rsa','a//b'):
                 with self.subTest(path=candidate),self.assertRaises(ValueError):
                     fn('hbf-mcp',[candidate])
             call.assert_not_called()

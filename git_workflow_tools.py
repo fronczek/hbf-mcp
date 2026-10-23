@@ -28,7 +28,7 @@ ORIGIN_REPOSITORIES = {
     'hbf-azure-ocr': ('git.hbf.pl', 'hbf/hbf-azure-ocr'),
 }
 BRANCH = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_./-]{0,110}$')
-SECRET = re.compile(r'(^|/)(\.env(?:\.|$)|credentials?(?:/|$)|secrets?(?:/|$)|\.ssh/|\.gnupg/)|(?:\.pem|\.key|\.p12|\.pfx)$',re.I)
+SECRET = re.compile(r'(^|/)(\.env(?:\.|$)|\.?credentials?(?:/|$)|secrets?(?:/|$)|\.ssh/|\.gnupg/)|(?:\.pem|\.key|\.p12|\.pfx)$',re.I)
 
 
 def _path(repo: str) -> Path:

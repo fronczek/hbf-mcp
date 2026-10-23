@@ -222,7 +222,7 @@ The service is configured as stateless HTTP with JSON responses because the curr
 ## Zabbix read-only monitoring
 
 Install the tracked `bin/zabbix-watch` at `/home/gptagent/bin/zabbix-watch`
-(mode 0755); keep `zabbix.yml` (0600) in `/home/gptagent/credentials/`.
+(mode 0755); keep `zabbix.yml` (0600) in `/home/gptagent/.credentials/`.
 Install `python3-yaml` and `python3-requests` from Ubuntu packages for the
 system Python used by the helper. Register `zabbix_tools.py` along with
 `server.py`, then restart `hbf-mcp.service` and refresh ChatGPT connector tools.
@@ -240,4 +240,4 @@ For manual checks before a controlled service restart:
 
 The tracked bin/kuk-boiler-watch helper is installed and upgraded together with
 bin/zabbix-watch. Its local InfluxDB credentials remain in
-/home/gptagent/credentials/influxdb.yml; install.sh never replaces that file.
+/home/gptagent/.credentials/influxdb.yml; install.sh never replaces that file.
