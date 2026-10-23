@@ -29,6 +29,17 @@ def _parser() -> argparse.ArgumentParser:
     diff = gt.add_parser("diff"); diff.add_argument("repo"); diff.add_argument("number", type=int)
     files = gt.add_parser("files"); files.add_argument("repo"); files.add_argument("number", type=int); files.add_argument("--page", type=int, default=1); files.add_argument("--limit", type=int, default=30)
     st = gt.add_parser("status"); st.add_argument("repo"); st.add_argument("ref")
+    mm = gt.add_parser("mark-merged", help="record an already pushed signed two-parent merge")
+    mm.add_argument("repo"); mm.add_argument("number", type=int)
+    mm.add_argument("--head", required=True, help="expected exact PR head SHA")
+    mm.add_argument("--commit", required=True, help="existing signed remote master merge SHA")
+    mm.add_argument("--apply", action="store_true")
+    ci = gt.add_parser("close-integrated", help="close verified Git-merged PR if manually-merged API is disabled")
+    ci.add_argument("repo"); ci.add_argument("number", type=int)
+    ci.add_argument("--head", required=True)
+    ci.add_argument("--commit", required=True)
+    ci.add_argument("--dsh-tier", choices=("dsh-pro", "dsh-flash"))
+    ci.add_argument("--apply", action="store_true")
     create = gt.add_parser("create-pr", help="create a PR (body from stdin)")
     create.add_argument("repo"); create.add_argument("--title", required=True)
     create.add_argument("--head", required=True); create.add_argument("--base", default="master")
@@ -67,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
             elif args.op == "comments": result = api.comments(args.issue_id, args.limit)
             elif args.op == "add-comment": result = api.add_comment(args.issue_id, sys.stdin.read(10_001))
         elif args.service == "gitea":
-            if args.op == "create-pr" and not args.apply:
+            if args.op in {"create-pr", "mark-merged", "close-integrated"} and not args.apply:
                 raise ValueError("Write not sent; repeat with --apply to confirm")
             api = Gitea()
             if args.op == "connection": result = api.connection()
@@ -80,6 +91,15 @@ def main(argv: list[str] | None = None) -> int:
             elif args.op == "create-pr":
                 result = api.create_pull_request(args.repo, args.title, args.head, args.base,
                                                  sys.stdin.read(20_001))
+            elif args.op == "mark-merged":
+                result = api.mark_manually_merged(args.repo, args.number,
+                                                  expected_head_sha=args.head,
+                                                  merge_commit_sha=args.commit)
+            elif args.op == "close-integrated":
+                result = api.close_integrated_pr(args.repo, args.number,
+                                                 expected_head_sha=args.head,
+                                                 merge_commit_sha=args.commit,
+                                                 dsh_tier=args.dsh_tier)
         elif args.service == "dsh":
             if args.op == "sessions": result = dsh.sessions(args.limit)
             elif args.op == "flash":

@@ -44,6 +44,8 @@ hbf-api youtrack comments ISSUE-ID [--limit N]
 hbf-api youtrack add-comment ISSUE-ID --apply   # comment body from stdin
 hbf-api gitea connection|branches|pulls|pull|diff|files|status ...
 hbf-api gitea create-pr REPO --title TITLE --head BRANCH --base master --apply  # body from stdin
+hbf-api gitea mark-merged REPO NUMBER --head EXACT_PR_SHA --commit SIGNED_MASTER_MERGE_SHA --apply
+hbf-api gitea close-integrated REPO NUMBER --head EXACT_PR_SHA --commit SIGNED_MASTER_MERGE_SHA --apply
 hbf-api dsh sessions [--limit N]
 hbf-api dsh flash ISSUE-ID --workdir ABSOLUTE-HARNESS-PATH --apply [--max-usd N]
 hbf-api monitor list
@@ -51,7 +53,7 @@ hbf-api monitor zabbix PROFILE [--hours 24] [--config PATH]
 hbf-api monitor influx PROFILE [--hours N] [--config PATH]
 ```
 
-DSH task, YouTrack comment, and Gitea PR body text are read from stdin, not command-line arguments (so they do not end up in shell history or command approval prompts). Set `HBF_DSH_HELPER` to the installed helper; the default is `~/bin/dsh-remote`. Its HTTPS authentication is managed by that helper and is not yet migrated to a portable token-file contract. Task dispatch requires an explicit work directory, a bounded budget, an allowed workdir (`HBF_DSH_ALLOWED_WORKDIRS`, path-separated), and `--apply`. PR creation checks for an existing matching head/base before writing; if the HTTP outcome is ambiguous, inspect Gitea before retrying.
+DSH task, YouTrack comment, and Gitea PR body text are read from stdin, not command-line arguments (so they do not end up in shell history or command approval prompts). Set `HBF_DSH_HELPER` to the installed helper; the default is `~/bin/dsh-remote`. Its HTTPS authentication is managed by that helper and is not yet migrated to a portable token-file contract. Task dispatch requires an explicit work directory, a bounded budget, an allowed workdir (`HBF_DSH_ALLOWED_WORKDIRS`, path-separated), and `--apply`. PR creation checks for an existing matching head/base before writing; if the HTTP outcome is ambiguous, inspect Gitea before retrying. Manual-merge recording only marks a PR as merged after a separate **locally signed and already pushed** two-parent master merge, exact head validation and green CI; it does not run a Git merge or create an unsigned commit. If the repository disables `manually-merged` (HTTP 405), `close-integrated` is an **explicit**, independently verified fallback: it posts an agent-attributed audit note and closes the already-integrated PR. Gitea will show **Closed**, not **Merged**, while the signed master commit remains the authoritative code evidence.
 
 Gitea defaults to an exact repository allowlist; override it with `HBF_GITEA_REPOSITORIES` (comma-separated exact `owner/repo` values). Read operations are the default. Every external mutation must have an explicit, reviewable invocation and must never be retried blindly after an ambiguous network outcome.
 
