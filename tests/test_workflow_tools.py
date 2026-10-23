@@ -94,6 +94,28 @@ class DeepSeekToolsTests(unittest.TestCase):
             with self.assertRaises(ValueError):fn('OTHER-123','Do a thing on ESE-123')
             with self.assertRaises(ValueError):fn('ESE-123','Do a thing on ESE-123',max_usd=4)
             runner.assert_not_called()
+    def test_budget_guard_error_is_classified_without_exposing_stderr(self):
+        raw='dsh-remote: budget guard: DeepSeek account unavailable/balance check failed; set DSH_BUDGET_OVERRIDE=1'
+        self.assertEqual(agent._error_category(raw),'budget_guard')
+
+    def test_flash_returns_safe_not_started_result_for_helper_rejection(self):
+        fn=find('deepseek_flash_task',agent)
+        with patch.object(agent,'_run',side_effect=RuntimeError(
+                'Local helper returned status 1; inspect existing state (stderr category: budget_guard)')):
+            result=fn('ESE-813','Analyze source ACL evidence safely')
+        self.assertEqual(result['issue'],'ESE-813')
+        self.assertEqual(result['status'],'not_started')
+        self.assertIn('budget_guard',result['error'])
+        self.assertNotIn('DSH_BUDGET_OVERRIDE',str(result))
+
+    def test_flash_timeout_returns_unknown_and_warns_against_blind_retry(self):
+        fn=find('deepseek_flash_task',agent)
+        with patch.object(agent,'_run',side_effect=RuntimeError(
+                'Local helper timed out; inspect existing session before retry')):
+            result=fn('ESE-813','Analyze source ACL evidence safely')
+        self.assertEqual(result['status'],'unknown')
+        self.assertIn('inspect existing session before retry',result['error'])
+
     def test_flash_uses_pinned_helper_api_and_budget(self):
         fn=find('deepseek_flash_task',agent)
         with patch.object(agent,'_run',return_value='session: 99\ntokens: uncached=1\nestimated USD cost: 0.001\n---- assistant result ----\nOK') as runner:
