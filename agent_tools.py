@@ -80,7 +80,7 @@ def register_tools(mcp:Any)->None:
         if not ESE.fullmatch(issue_id): raise ValueError('Expected ESE issue ID')
         if not 15<=len(task)<=8000: raise ValueError('Task length must be 15..8000')
         if not 0.001<=max_usd<=1.00: raise ValueError('Task budget must be USD 0.001..1.00')
-        if not 30<=timeout_seconds<=600: raise ValueError('Timeout must be 30..600 s')
+        if not 10<=timeout_seconds<=3600: raise ValueError('Timeout must be 10..3600 s')
         prompt=(f'Work on {issue_id} only. Before editing, pull latest from configured remote. '
                 'Follow AGENTS.md and existing repository/project rules. '
                 'Do not use GPT credentials, SSH into MCP01 or other hosts, or access another agent identity. '

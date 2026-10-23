@@ -116,6 +116,23 @@ class DeepSeekToolsTests(unittest.TestCase):
         self.assertEqual(result['status'],'unknown')
         self.assertIn('inspect existing session before retry',result['error'])
 
+    def test_flash_timeout_accepts_900_seconds_and_matches_helper_argument(self):
+        fn=find('deepseek_flash_task',agent)
+        with patch.object(agent,'_run',return_value='session: 99\n---- assistant result ----\nOK') as runner:
+            fn('ESE-813','Analyze source ACL evidence safely',timeout_seconds=900)
+        args=runner.call_args.args[0]
+        self.assertEqual(args[args.index('--timeout')+1],'900')
+        self.assertEqual(runner.call_args.kwargs['timeout'],965)
+
+    def test_flash_timeout_rejects_values_outside_helper_range(self):
+        fn=find('deepseek_flash_task',agent)
+        with patch.object(agent,'_run') as runner:
+            with self.assertRaisesRegex(ValueError,'10..3600'):
+                fn('ESE-813','Analyze source ACL evidence safely',timeout_seconds=9)
+            with self.assertRaisesRegex(ValueError,'10..3600'):
+                fn('ESE-813','Analyze source ACL evidence safely',timeout_seconds=3601)
+            runner.assert_not_called()
+
     def test_flash_uses_pinned_helper_api_and_budget(self):
         fn=find('deepseek_flash_task',agent)
         with patch.object(agent,'_run',return_value='session: 99\ntokens: uncached=1\nestimated USD cost: 0.001\n---- assistant result ----\nOK') as runner:
