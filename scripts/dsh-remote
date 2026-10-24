@@ -13,7 +13,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-BASE_URL = os.environ.get("DSH_REMOTE_URL", "https://dsh.hbf.pl").rstrip("/")
+BASE_URL = os.environ.get("DSH_REMOTE_URL", "https://hbfplhdshu01.hbf.pl").rstrip("/")
 CONFIG_HOME = Path.home() / ".config" / "dsh-remote"
 COOKIE_FILE = CONFIG_HOME / "cookies.txt"
 CREDENTIALS_DIR = Path(os.environ.get("HBF_CREDENTIALS_DIR", str(Path.home() / ".credentials"))).expanduser()
