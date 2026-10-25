@@ -16,7 +16,11 @@ from .config import ConfigurationError, load_scalar_yaml
 # Adding more execution hosts requires a reviewed code change.
 HOST_ACTORS = {
     "hbfplhmcpu01": ("gpt", "gptagent"),
-    "hbfplhdshu01": ("dsh", "afronczek"),
+    # The 2026-10-24 DSH migration moved the workbench from the owner's
+    # `afronczek` account to the dedicated `dsh` account; `agent.yml` was
+    # provisioned with that binding. The old `afronczek` value is deliberately
+    # not accepted any more: one host, one agent Unix account.
+    "hbfplhdshu01": ("dsh", "dsh"),
 }
 
 

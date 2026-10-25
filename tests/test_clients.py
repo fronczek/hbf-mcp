@@ -116,9 +116,9 @@ class ClientsTest(unittest.TestCase):
 
     def test_dsh_host_and_actor_are_allowed_when_bound(self):
         (self.cred / "agent.yml").write_text(
-            "agent_login: dsh\nagent_host: hbfplhdshu01\nagent_unix_user: afronczek\n")
+            "agent_login: dsh\nagent_host: hbfplhdshu01\nagent_unix_user: dsh\n")
         with patch("hbf_api_tools.identity.socket.gethostname", return_value="hbfplhdshu01"), \
-             patch("hbf_api_tools.identity.pwd.getpwuid", return_value=SimpleNamespace(pw_name="afronczek")):
+             patch("hbf_api_tools.identity.pwd.getpwuid", return_value=SimpleNamespace(pw_name="dsh")):
             self.assertEqual(acting_agent(), "dsh")
 
     def test_gitea_refuses_wrong_token_before_pr_create(self):

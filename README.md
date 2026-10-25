@@ -33,7 +33,7 @@ agent_host: hbfplhmcpu01
 agent_unix_user: gptagent
 ```
 
-The DSH-specific profile, provisioned by the owner **on DSH only**, uses `dsh`, `hbfplhdshu01` and `afronczek`. Never exchange credential files or signing helpers between these hosts. Automatic agent work and writes are limited to their bound hosts; owner-interactive plugin actions are distinct and must not masquerade as agent work.
+The DSH-specific profile, provisioned by the owner **on DSH only**, uses `dsh`, `hbfplhdshu01` and `dsh` (the workbench account; the pre-migration `afronczek` worktree is no longer an accepted binding). Never exchange credential files or signing helpers between these hosts. Automatic agent work and writes are limited to their bound hosts; owner-interactive plugin actions are distinct and must not masquerade as agent work.
 
 The MCP01 helper sources are versioned in `scripts/`: `dsh-remote`, `deepseek-api`, and `dsh-budget-guard`. They all use `HBF_CREDENTIALS_DIR` when set and otherwise `~/.credentials`; no helper defaults to `~/credentials`. The deployed `~/bin` entries should point to these reviewed sources so runtime and repository copies cannot drift. `dsh-remote bootstrap --token-file PATH` remains available for an explicit token path.
 
