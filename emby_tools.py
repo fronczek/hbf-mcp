@@ -129,7 +129,9 @@ def _base_url(target: str, config: dict[str, str]) -> str:
             ip = ipaddress.ip_address(host)
         except ValueError:
             raise RuntimeError("Emby internal URL must use a private IP") from None
-        if parts.scheme not in ("http", "https") or not ip.is_private or ip.is_link_local:
+        if (parts.scheme not in ("http", "https") or not ip.is_private
+                or ip.is_link_local or ip.is_loopback or ip.is_unspecified
+                or ip.is_multicast):
             raise RuntimeError("Emby internal URL is not permitted")
     else:
         # Each locally provisioned file owns its external hostname.
