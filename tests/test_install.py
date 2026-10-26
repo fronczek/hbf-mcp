@@ -17,7 +17,7 @@ def installer(tmp_path):
     source.mkdir()
     for name in ("server.py", "test_client.py", "auth0_resource.py", "gitea_tools.py", "youtrack_tools.py",
                  "git_workflow_tools.py", "agent_tools.py", "diagnostics_tools.py",
-                 "zabbix_tools.py", "bin/zabbix-watch", "bin/kuk-boiler-watch",
+                 "zabbix_tools.py", "emby_tools.py", "bin/zabbix-watch", "bin/kuk-boiler-watch",
                  "requirements.txt", "hbf-mcp.env.example", "systemd/hbf-mcp.service",
                  "completion/hbf-mcp"):
         dest = source / name
