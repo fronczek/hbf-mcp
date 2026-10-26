@@ -176,6 +176,10 @@ Do not enable MCP auth here without agreeing the matching ChatGPT configuration
 first; until then the network boundary (HTTPS reverse proxy plus restricted
 port 8765 access) is what protects the endpoint.
 
+The reviewed Auth0 resource-server configuration and parallel-instance migration
+gate are documented in [docs/oauth-auth0.md](docs/oauth-auth0.md). OAuth remains
+disabled by default; stage it on a separate named instance before any route switch.
+
 ## Configuration
 
 Environment file:
