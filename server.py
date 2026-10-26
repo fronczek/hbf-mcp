@@ -791,6 +791,8 @@ register_agent_tools(mcp)
 register_diagnostics_tools(mcp)
 from zabbix_tools import register_tools as register_zabbix_tools
 register_zabbix_tools(mcp)
+from emby_tools import register_tools as register_emby_tools
+register_emby_tools(mcp)
 
 if __name__ == "__main__":
     mcp.run(

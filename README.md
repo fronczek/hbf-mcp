@@ -219,6 +219,13 @@ The service is configured as stateless HTTP with JSON responses because the curr
 - [Odświeżenie stacku i diagnostyka zatwierdzeń (PL)](docs/refresh-stack.pl.md)
 - [Ocena oficjalnego gitea-mcp i konfiguracja pilota (PL)](docs/gitea-mcp-evaluation.pl.md)
 
+## Emby read-only integrations
+
+Discover Emby servers from service-account files matching .credentials/emby*.yml.
+Select the target explicitly when several instances exist. See
+[Emby multi-instance tools](docs/emby-tools.md) for configuration, API tools
+and safe deployment.
+
 ## Zabbix read-only monitoring
 
 Install the tracked `bin/zabbix-watch` at `/home/gptagent/bin/zabbix-watch`
