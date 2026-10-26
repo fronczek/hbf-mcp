@@ -27,6 +27,9 @@ from pathlib import Path
 from typing import Any
 
 from mcp.server import MCPServer
+from mcp.server.auth.settings import AuthSettings
+from pydantic import AnyHttpUrl
+from auth0_resource import Auth0Verifier
 from mcp.types import ToolAnnotations
 
 
@@ -323,8 +326,30 @@ def _run_readonly(args: list[str], *, timeout: int | None = None) -> subprocess.
 # Server
 # ---------------------------------------------------------------------------
 
+def oauth_settings() -> dict:
+    """Enable strict JWT verification only with complete Auth0 configuration."""
+    enabled = os.getenv("HBF_MCP_OAUTH_ENABLED", "false").strip().lower()
+    if enabled in ("false", "0", "no"):
+        return {}
+    if enabled not in ("true", "1", "yes"):
+        raise RuntimeError("HBF_MCP_OAUTH_ENABLED must be an explicit boolean")
+    issuer = os.environ["HBF_MCP_AUTH0_ISSUER"].rstrip("/") + "/"
+    audience = os.environ["HBF_MCP_PUBLIC_URL"]
+    verifier = Auth0Verifier(issuer, audience,
+                            os.environ["HBF_MCP_AUTH0_CLIENT_ID"],
+                            os.environ["HBF_MCP_AUTH0_OWNER_SUB"])
+    return {
+        "token_verifier": verifier,
+        "auth": AuthSettings(issuer_url=AnyHttpUrl(issuer),
+                             resource_server_url=AnyHttpUrl(audience),
+                             required_scopes=["mcp:admin"],
+                             validate_token_resource=True),
+    }
+
+
 mcp = MCPServer(
     NAME,
+    **oauth_settings(),
     instructions=(
         "This is Artur's single-purpose administrative bridge VM. The MCP "
         "service account is unprivileged: it has no sudo and this server "
