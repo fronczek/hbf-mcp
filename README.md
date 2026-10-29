@@ -27,10 +27,10 @@ Credential contracts (flat YAML scalar keys; values remain local):
 Identity profiles (no tokens in this sample):
 
 ```yaml
-# hbfplhmcpu01: /home/gptagent/.credentials/agent.yml, mode 0600
+# vps1123: /home/lindir/.credentials/agent.yml, mode 0600
 agent_login: gpt
-agent_host: hbfplhmcpu01
-agent_unix_user: gptagent
+agent_host: vps1123
+agent_unix_user: lindir
 ```
 
 The DSH-specific profile, provisioned by the owner **on DSH only**, uses `dsh`, `hbfplhdshu01` and `dsh` (the workbench account; the pre-migration `afronczek` worktree is no longer an accepted binding). Never exchange credential files or signing helpers between these hosts. Automatic agent work and writes are limited to their bound hosts; owner-interactive plugin actions are distinct and must not masquerade as agent work.

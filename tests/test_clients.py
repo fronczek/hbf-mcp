@@ -24,7 +24,7 @@ class ClientsTest(unittest.TestCase):
         self.cred = Path(self.temp.name) / ".credentials"
         self.cred.mkdir(mode=0o700)
         for name, contents in (
-            ("agent.yml", "agent_login: gpt\nagent_host: hbfplhmcpu01\nagent_unix_user: gptagent\n"),
+            ("agent.yml", "agent_login: gpt\nagent_host: vps1123\nagent_unix_user: lindir\n"),
             ("youtrack.yml", "youtrack_url: https://youtrack.hbf.pl\nyoutrack_token_value: secret\n"),
             ("gitea.yml", "gitea_url: https://git.hbf.pl\ntoken_value: secret\n"),
         ):
@@ -33,8 +33,8 @@ class ClientsTest(unittest.TestCase):
             path.chmod(0o600)
         self.env = patch.dict(os.environ, {"HBF_CREDENTIALS_DIR": str(self.cred)}, clear=False)
         self.env.start()
-        self.host = patch("hbf_api_tools.identity.socket.gethostname", return_value="hbfplhmcpu01")
-        self.user = patch("hbf_api_tools.identity.pwd.getpwuid", return_value=SimpleNamespace(pw_name="gptagent"))
+        self.host = patch("hbf_api_tools.identity.socket.gethostname", return_value="vps1123")
+        self.user = patch("hbf_api_tools.identity.pwd.getpwuid", return_value=SimpleNamespace(pw_name="lindir"))
         self.host.start()
         self.user.start()
         os.environ.pop("HBF_GITEA_REPOSITORIES", None)
@@ -106,6 +106,12 @@ class ClientsTest(unittest.TestCase):
 
     def test_other_host_is_refused_even_with_gpt_credentials(self):
         with patch("hbf_api_tools.identity.socket.gethostname", return_value="random-host"):
+            with self.assertRaisesRegex(config.ConfigurationError, "refused on this host"):
+                acting_agent()
+
+    def test_retired_gpt_host_is_refused_after_migration(self):
+        with patch("hbf_api_tools.identity.socket.gethostname", return_value="hbfplhmcpu01"), \
+             patch("hbf_api_tools.identity.pwd.getpwuid", return_value=SimpleNamespace(pw_name="gptagent")):
             with self.assertRaisesRegex(config.ConfigurationError, "refused on this host"):
                 acting_agent()
 

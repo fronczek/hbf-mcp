@@ -15,7 +15,11 @@ from .config import ConfigurationError, load_scalar_yaml
 # Executing on an unrecognised host or via a different Unix user FAILS CLOSED.
 # Adding more execution hosts requires a reviewed code change.
 HOST_ACTORS = {
-    "hbfplhmcpu01": ("gpt", "gptagent"),
+    # The 2026-10-28 GPT workbench migration moved execution from
+    # `gptagent@hbfplhmcpu01` to `lindir@vps1123`. The Gitea/YouTrack actor
+    # remains `gpt`; `lindir` is the dedicated Unix account on the new host.
+    # The old binding is deliberately not accepted any more.
+    "vps1123": ("gpt", "lindir"),
     # The 2026-10-24 DSH migration moved the workbench from the owner's
     # `afronczek` account to the dedicated `dsh` account; `agent.yml` was
     # provisioned with that binding. The old `afronczek` value is deliberately
