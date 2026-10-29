@@ -55,9 +55,13 @@ def _parser() -> argparse.ArgumentParser:
 
     ds = groups.add_parser("dsh", help="Bounded DeepSeek Harness operations").add_subparsers(dest="op", required=True)
     sessions = ds.add_parser("sessions"); sessions.add_argument("--limit", type=int, default=10)
+    dstatus = ds.add_parser("status", help="inspect one stable dispatch without reading its prompt")
+    dstatus.add_argument("dispatch_id")
     flash = ds.add_parser("flash", help="Dispatch a budget-capped task (task text from stdin)")
-    flash.add_argument("issue_id"); flash.add_argument("--workdir", required=True, help="absolute Harness workspace path")
-    flash.add_argument("--max-usd", type=float, default=1.0)
+    flash.add_argument("issue_id")
+    flash.add_argument("--workdir", default=dsh.DEFAULT_WORKDIR,
+                       help="absolute Harness workspace path")
+    flash.add_argument("--max-usd", type=float, default=dsh.DEFAULT_MAX_USD)
     flash.add_argument("--timeout", type=int, default=180); flash.add_argument("--apply", action="store_true")
 
     mon = groups.add_parser("monitor", help="Read-only configured monitoring checks")
@@ -114,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
                                                  dsh_tier=args.dsh_tier)
         elif args.service == "dsh":
             if args.op == "sessions": result = dsh.sessions(args.limit)
+            elif args.op == "status": result = dsh.dispatch_status(args.dispatch_id)
             elif args.op == "flash":
                 if not args.apply:
                     raise ValueError("Dispatch not sent; repeat with --apply to confirm")

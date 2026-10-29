@@ -13,6 +13,7 @@ from hbf_api_tools import config
 from hbf_api_tools.identity import acting_agent
 from hbf_api_tools.gitea import Gitea
 from hbf_api_tools.youtrack import YouTrack
+from hbf_api_tools import dsh as dsh_module
 from hbf_api_tools.dsh import flash_task
 from hbf_api_tools.cli import main
 from hbf_api_tools import youtrack as youtrack_module
@@ -387,6 +388,34 @@ class ClientsTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "outside HBF_DSH_ALLOWED_WORKDIRS"):
             flash_task("ESE-1", "A bounded task description long enough",
                        workdir="/home/afronczek/esekretariat/../../etc")
+
+    def test_dsh_default_dispatch_is_stable_bounded_and_non_delegating(self):
+        raw = ("session: gpt-flash-ese-1-abc\n"
+               "tokens: uncached=1, cached=2, output=3\n"
+               "estimated USD cost: 0.000001 off-peak to 0.000002 peak\n"
+               "---- assistant result ----\nDone")
+        task = "Implement the bounded fix and publish a PR."
+        expected = dsh_module.dispatch_id("ESE-1", task, dsh_module.DEFAULT_WORKDIR)
+        with patch.object(dsh_module, "_helper", return_value=Path("/helper")), \
+             patch.object(dsh_module, "_run", return_value=raw) as run:
+            result = flash_task("ESE-1", task)
+        self.assertEqual(result["dispatch"], expected)
+        args = run.call_args.args[0]
+        self.assertIn("--max-usd", args)
+        self.assertEqual(args[args.index("--max-usd") + 1], "0.2")
+        self.assertEqual(args[args.index("--dispatch-id") + 1], expected)
+        prompt = run.call_args.kwargs["input_text"]
+        self.assertIn("Do not spawn subagents", prompt)
+        self.assertIn("fetch the target repository", prompt)
+        self.assertNotIn("pull latest", prompt)
+        self.assertIn("Do not", prompt)
+        self.assertIn("merge a PR", prompt)
+
+    def test_dsh_high_budget_requires_explicit_owner_override(self):
+        task = "Implement the bounded fix and publish a PR."
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(ValueError, "0.50"):
+                flash_task("ESE-1", task, max_usd=0.51)
 
     def test_cli_write_without_apply_does_not_load_credentials(self):
         with patch("hbf_api_tools.cli.YouTrack", side_effect=AssertionError("must not load")):

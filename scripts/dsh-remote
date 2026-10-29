@@ -4,6 +4,7 @@ import fcntl
 import http.cookiejar
 import json
 import os
+import re
 import ssl
 import sys
 import time
@@ -20,6 +21,10 @@ CREDENTIALS_DIR = Path(os.environ.get("HBF_CREDENTIALS_DIR", str(Path.home() / "
 DEFAULT_TOKEN_FILE = CREDENTIALS_DIR / "dsh-launch-token.txt"
 CA_FILE = Path(os.environ.get("DSH_REMOTE_CA", str(CONFIG_HOME / "caddy-root.crt")))
 BUDGET_BLOCK_FILE = Path.home() / ".local/state/dsh-budget-guard/start-block.json"
+DISPATCH_RE = re.compile(r"^[a-z0-9][a-z0-9-]{7,63}$")
+DEFAULT_WORKDIR = "/home/dsh/esekretariat"
+NORMAL_MAX_USD = 0.50
+OWNER_MAX_USD = 1.00
 
 
 def fail(msg, code=1):
@@ -178,6 +183,43 @@ def session_item(session_id):
     return None
 
 
+def dispatch_session_id(dispatch_id):
+    if not isinstance(dispatch_id, str) or not DISPATCH_RE.fullmatch(dispatch_id):
+        fail("dispatch ID must match [a-z0-9][a-z0-9-]{7,63}")
+    return "gpt-flash-" + dispatch_id
+
+
+def dispatch_status(dispatch_id):
+    sid = dispatch_session_id(dispatch_id)
+    item = session_item(sid)
+    if item is None:
+        print(json.dumps({"dispatch": dispatch_id, "found": False}, separators=(",", ":")))
+        return
+    values = ((item.get("projections") or {}).get("values") or {})
+    usage = values.get("tokenUsage") or {}
+    used = (values.get("modelSelection") or {}).get("lastUsed") or {}
+    result = {
+        "dispatch": dispatch_id,
+        "found": True,
+        "session": sid,
+        "running": bool(item.get("running")),
+        "blank": bool(item.get("blank")),
+        "cwd": item.get("cwd"),
+        "updated": item.get("updatedAt"),
+        "model": {"provider": used.get("provider"), "model": used.get("model")},
+        "tokens": {
+            "uncached": usage.get("uncachedInputTokens", 0),
+            "cached": usage.get("cacheReadTokens", 0),
+            "output": usage.get("outputTokens", 0),
+        },
+        "estimated_usd": {
+            "off_peak": round(flash_estimate(usage, FLASH_OFFPEAK), 6),
+            "peak": round(flash_estimate(usage, FLASH_PEAK), 6),
+        },
+    }
+    print(json.dumps(result, separators=(",", ":")))
+
+
 def extract_text(value):
     # DSH assistant/message shapes can evolve; prefer obvious text/content fields.
     if isinstance(value, str):
@@ -334,15 +376,26 @@ def flash_estimate(usage, rates):
             usage.get("outputTokens", 0)*out) / 1_000_000
 
 
-def flash_dispatch(task, cwd, timeout=180, max_usd=1.00, effort="low", allow_concurrent=False, warn_usd=0.50):
+def flash_dispatch(task, cwd=DEFAULT_WORKDIR, timeout=180, max_usd=0.20,
+                   effort="low", allow_concurrent=False, warn_usd=0.10,
+                   dispatch_id=None):
     """Dispatch directly to Flash, restoring default BEFORE any model request."""
     if not task.strip():
         fail("flash requires a task")
     if not 10 <= timeout <= 3600 or max_usd <= 0 or warn_usd <= 0:
         fail("timeout must be 10..3600 seconds; max-usd and warn-usd must be positive")
+    owner_override = os.environ.get("DSH_BUDGET_OVERRIDE") == "1"
+    ceiling = OWNER_MAX_USD if owner_override else NORMAL_MAX_USD
+    if max_usd > ceiling:
+        fail(f"max-usd exceeds USD {ceiling:.2f}; higher budget requires explicit owner override")
+    sid = dispatch_session_id(dispatch_id)
     # Preserve sensible warnings for callers specifying a smaller per-task cap.
     effective_warn_usd = min(warn_usd, max_usd / 2)
     budget_preflight()
+    existing = session_item(sid)
+    if existing is not None:
+        state = "running" if existing.get("running") else "already recorded"
+        fail(f"dispatch {dispatch_id} is {state} as session {sid}; inspect status, do not retry")
     if not allow_concurrent:
         active = [entry.get("sessionId") for entry in (session_list().get("items") or [])
                   if entry.get("running") and entry.get("cwd") == cwd]
@@ -361,7 +414,10 @@ def flash_dispatch(task, cwd, timeout=180, max_usd=1.00, effort="low", allow_con
         # global default restoration. Never revert the Flash task session.
         restorer = "gpt-flash-default-restorer"
         rpc("session/create", {"request": {"workspaceId": wid, "sessionId": restorer}})
-        sid = rpc("session/create", {"request": {"workspaceId": wid}})["sessionId"]
+        created = rpc("session/create", {"request": {
+            "workspaceId": wid, "sessionId": sid}})["sessionId"]
+        if created != sid:
+            raise RuntimeError("DSH returned a different session for the stable dispatch ID")
         print(f"session: {sid}", flush=True)
         flash_revision = None
         try:
@@ -383,7 +439,8 @@ def flash_dispatch(task, cwd, timeout=180, max_usd=1.00, effort="low", allow_con
         fcntl.flock(lock, fcntl.LOCK_UN)
     budget_preflight()
     rpc("session/prompt", {"request": {
-        "requestId": str(uuid.uuid4()), "sessionId": sid, "mode": "queue",
+        "requestId": str(uuid.uuid5(uuid.NAMESPACE_URL, "hbf-dsh:" + dispatch_id)),
+        "sessionId": sid, "mode": "queue",
         "content": [{"type": "text", "text": task}],
         "clientTimeZone": "Europe/Warsaw",
     }})
@@ -456,6 +513,9 @@ def main():
     s.add_argument("--json", action="store_true")
     s.add_argument("--brief-limit", type=int, choices=range(1, 26), default=None)
 
+    ds = sub.add_parser("dispatch-status", help="show bounded status for one stable dispatch")
+    ds.add_argument("dispatch_id")
+
     n = sub.add_parser("new", help="create a DSH session")
     location = n.add_mutually_exclusive_group()
     location.add_argument("--cwd", help="resolve/register this directory as a DSH workspace")
@@ -474,12 +534,14 @@ def main():
 
     fl = sub.add_parser("flash", help="run one bounded DSH Flash task without Pro")
     fl.add_argument("task", nargs="+", help="text or - for stdin")
-    fl.add_argument("--cwd", default="/home/afronczek/esekretariat")
+    fl.add_argument("--cwd", default=DEFAULT_WORKDIR)
     fl.add_argument("--timeout", type=int, default=180)
-    fl.add_argument("--max-usd", type=float, default=1.00,
-                    help="per-task SOFT peak-price stop (default $1.00), not a billing hard limit")
-    fl.add_argument("--warn-usd", type=float, default=0.50,
-                    help="per-task warning at peak-price estimate (default $0.50); no stop")
+    fl.add_argument("--max-usd", type=float, default=0.20,
+                    help="per-task SOFT peak-price stop (default $0.20), not a billing hard limit")
+    fl.add_argument("--warn-usd", type=float, default=0.10,
+                    help="per-task warning at peak-price estimate (default $0.10); no stop")
+    fl.add_argument("--dispatch-id", required=True,
+                    help="stable issue/task fingerprint used to prevent duplicate dispatch")
     fl.add_argument("--effort", choices=["low", "medium", "high"], default="low")
     fl.add_argument("--allow-concurrent", action="store_true",
                     help="allow other running DSH sessions in the same workspace")
@@ -490,6 +552,7 @@ def main():
     args = p.parse_args()
     if args.cmd == "bootstrap": bootstrap(args.token_file)
     elif args.cmd == "sessions": print_sessions(args.json, args.brief_limit)
+    elif args.cmd == "dispatch-status": dispatch_status(args.dispatch_id)
     elif args.cmd == "new": new_session(args.cwd, args.id, args.workspace_id)
     elif args.cmd == "prompt": prompt(args.session_id, " ".join(args.prompt), not args.no_wait, args.timeout, args.mode)
     elif args.cmd == "cancel": cancel_session(args.session_id)
@@ -499,7 +562,7 @@ def main():
             fail("task exceeds 12000 characters: use a tracked brief")
         try:
             flash_dispatch(body, args.cwd, args.timeout, args.max_usd, args.effort,
-                           args.allow_concurrent, args.warn_usd)
+                           args.allow_concurrent, args.warn_usd, args.dispatch_id)
         except RuntimeError as exc:
             fail(str(exc))
     elif args.cmd == "last": last_answer(args.session_id)
