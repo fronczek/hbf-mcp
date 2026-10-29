@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 SCRIPTS = {
     "dsh-remote": ("DEFAULT_TOKEN_FILE", "dsh-launch-token.txt"),
     "deepseek-api": ("KEY_FILE", "deepseek.txt"),

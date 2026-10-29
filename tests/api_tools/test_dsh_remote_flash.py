@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 from unittest.mock import patch
 
-SOURCE = Path(__file__).resolve().parents[1] / "scripts" / "dsh-remote"
+SOURCE = Path(__file__).resolve().parents[2] / "scripts" / "dsh-remote"
 loader = SourceFileLoader("dsh_remote_under_test", str(SOURCE))
 spec = importlib.util.spec_from_loader(loader.name, loader)
 mod = importlib.util.module_from_spec(spec)
