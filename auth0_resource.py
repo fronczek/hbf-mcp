@@ -15,7 +15,7 @@ LOG = logging.getLogger(__name__)
 PERMISSIONS = frozenset(("mcp:admin",))
 
 class Auth0Verifier(TokenVerifier):
-    def __init__(self, issuer: str, audience: str, client_id: str, owner_sub: str,
+    def __init__(self, issuer: str, audience: str, client_id: str = "", owner_sub: str = "",
                  *, allowed_bindings: frozenset[tuple[str, str]] | None = None):
         issuer = issuer.rstrip("/") + "/"
         parsed = urlsplit(issuer)
