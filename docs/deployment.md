@@ -48,7 +48,9 @@ The playbook:
 3. Checks out the exact revision and installs server dependencies and the
    compatible CLI package into its own virtual environment.
 4. Installs a root-private environment and root-owned policy readable by the
-   service group. Source and virtual environment remain root-managed.
+   service group. The unit pins the policy to its immutable release path;
+   policy loading rejects symlink parents, so it must not use the current
+   symlink. Source and virtual environment remain root-managed.
 5. Compiles and imports the candidate with its authenticated configuration,
    without opening a listener.
 6. Atomically replaces the `current` symlink and starts/restarts systemd.

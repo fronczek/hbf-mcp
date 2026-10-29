@@ -153,7 +153,7 @@
       no_log: true
     - name: Compile candidate before switching
       ansible.builtin.command:
-        argv: ["{{ mcp_release }}/.venv/bin/python", -m, compileall, -q, "{{ mcp_release }}/server.py", "{{ mcp_release }}/auth0_resource.py", "{{ mcp_release }}/src"]
+        argv: ["{{ mcp_release }}/.venv/bin/python", -m, compileall, -q, "{{ mcp_release }}/server.py", "{{ mcp_release }}/auth0_resource.py", "{{ mcp_release }}/src", "{{ mcp_release }}/auth", "{{ mcp_release }}/services", "{{ mcp_release }}/tools"]
       changed_when: false
     - name: Validate authenticated candidate configuration without starting a listener
       ansible.builtin.command:
