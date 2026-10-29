@@ -161,8 +161,9 @@
           - "{{ mcp_release }}/.venv/bin/python"
           - -c
           - |
-            import os, pathlib, subprocess, sys
-            release, audit, host, port, home = sys.argv[1:]
+            import os, pathlib, pwd, subprocess, sys
+            release, audit, host, port, home, username = sys.argv[1:]
+            account = pwd.getpwnam(username)
             env = dict(os.environ)
             for line in pathlib.Path(release, 'runtime.env').read_text().splitlines():
                 line = line.strip()
@@ -173,14 +174,18 @@
                        HBF_MCP_POLICY_FILE=str(pathlib.Path(release, 'policy.json')),
                        HBF_MCP_AUDIT_FILE=str(pathlib.Path(audit, 'operations.jsonl')),
                        HBF_MCP_HOST=host, HBF_MCP_PORT=port,
-                       HBF_MCP_AGENT_HOME=home)
+                       HBF_MCP_AGENT_HOME=home, HOME=home, USER=username,
+                       LOGNAME=username)
             subprocess.run([sys.executable, '-c', 'import server; assert server.mcp'],
-                           cwd=release, env=env, check=True)
+                           cwd=release, env=env, check=True,
+                           user=account.pw_uid, group=account.pw_gid,
+                           extra_groups=os.getgrouplist(username, account.pw_gid))
           - "{{ mcp_release }}"
           - "{{ hbf_mcp_audit_dir }}"
           - "{{ hbf_mcp_host }}"
           - "{{ hbf_mcp_port | string }}"
           - "{{ hbf_mcp_home }}"
+          - "{{ hbf_mcp_user }}"
       changed_when: false
       no_log: true
     - name: Activate and check candidate, restoring previous release on failure
