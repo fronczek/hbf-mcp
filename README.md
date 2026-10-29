@@ -1,5 +1,10 @@
 # HBF MCP
 
+> Unified MCP: shared API services and compatible CLI now live in this repository.
+> See [architecture and rollout status](docs/unified-mcp.md),
+> [policy example](auth/policy.example.json) and [Ansible deployment](docs/deployment.md).
+> Multiuser access requires the protected policy-mode deployment; the old runtime is transitional.
+
 Personal MCP bridge for ChatGPT running on a disposable VM.
 
 The goal is deliberately simple:

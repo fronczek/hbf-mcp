@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "roles": {
+    "admin": {
+      "tools": {
+        "*": [
+          "*"
+        ]
+      }
+    },
+    "ese_reader": {
+      "tools": {
+        "api_gitea_branches": [
+          "secnet/ese-backend"
+        ],
+        "api_gitea_pulls": [
+          "secnet/ese-backend"
+        ],
+        "api_gitea_pull": [
+          "secnet/ese-backend"
+        ],
+        "api_gitea_status": [
+          "secnet/ese-backend"
+        ],
+        "api_youtrack_issue": [
+          "ESE"
+        ],
+        "api_youtrack_comments": [
+          "ESE"
+        ]
+      }
+    },
+    "monitor_reader": {
+      "tools": {
+        "api_monitor_list": [
+          "*"
+        ],
+        "api_monitor_zabbix": [
+          "pve_temperatures"
+        ],
+        "api_monitor_influx": [
+          "kuk_boiler"
+        ]
+      }
+    }
+  },
+  "bindings": [
+    {
+      "subject": "REPLACE_ARTUR_SUBJECT",
+      "client_id": "REPLACE_CHATGPT_CLIENT",
+      "roles": [
+        "admin"
+      ],
+      "agent": "chatgpt"
+    },
+    {
+      "subject": "REPLACE_ARTUR_SUBJECT",
+      "client_id": "REPLACE_CLAUDE_CLIENT",
+      "roles": [
+        "ese_reader",
+        "monitor_reader"
+      ],
+      "agent": "claude"
+    },
+    {
+      "subject": "REPLACE_MARIUSZ_SUBJECT",
+      "client_id": "REPLACE_CHATGPT_CLIENT",
+      "roles": [
+        "ese_reader"
+      ],
+      "agent": "chatgpt"
+    },
+    {
+      "subject": "REPLACE_MARIUSZ_SUBJECT",
+      "client_id": "REPLACE_CLAUDE_CLIENT",
+      "roles": [
+        "ese_reader"
+      ],
+      "agent": "claude"
+    },
+    {
+      "subject": "REPLACE_DSH_SUBJECT",
+      "client_id": "REPLACE_DSH_CLIENT",
+      "roles": [
+        "ese_reader"
+      ],
+      "agent": "dsh"
+    }
+  ],
+  "service_accounts": {
+    "gitea": {
+      "login": "gpt",
+      "host": "hbfplhmcpu01",
+      "unix_user": "gptagent"
+    },
+    "youtrack": {
+      "login": "gpt",
+      "host": "hbfplhmcpu01",
+      "unix_user": "gptagent"
+    }
+  },
+  "stdio_bindings": []
+}
