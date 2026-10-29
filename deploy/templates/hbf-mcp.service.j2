@@ -1,0 +1,26 @@
+[Unit]
+Description=HBF MCP authenticated service ({{ hbf_mcp_service }})
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ hbf_mcp_user }}
+Group={{ hbf_mcp_group }}
+WorkingDirectory={{ hbf_mcp_root }}/current
+EnvironmentFile={{ hbf_mcp_root }}/current/runtime.env
+Environment=HBF_MCP_TRANSPORT=streamable-http
+Environment=HBF_MCP_POLICY_FILE={{ hbf_mcp_root }}/current/policy.json
+Environment=HBF_MCP_AUDIT_FILE={{ hbf_mcp_audit_dir }}/operations.jsonl
+Environment=HBF_MCP_HOST={{ hbf_mcp_host }}
+Environment=HBF_MCP_PORT={{ hbf_mcp_port }}
+Environment=HBF_MCP_AGENT_HOME={{ hbf_mcp_home }}
+ExecStart={{ hbf_mcp_root }}/current/.venv/bin/python {{ hbf_mcp_root }}/current/server.py
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=30
+NoNewPrivileges=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

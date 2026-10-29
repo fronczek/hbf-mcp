@@ -1,0 +1,21 @@
+all:
+  children:
+    hbf_mcp:
+      hosts:
+        candidate:
+          ansible_host: hbfplhmcpu01
+          # Use your administrator SSH account; the bridge account has no sudo.
+          ansible_user: CHANGE_ME
+      vars:
+        hbf_mcp_service: hbf-mcp-candidate
+        hbf_mcp_root: /opt/hbf-mcp-candidate
+        hbf_mcp_user: gptagent
+        hbf_mcp_group: gptagent
+        hbf_mcp_host: 127.0.0.1
+        hbf_mcp_port: 18765
+        hbf_mcp_repo: https://github.com/fronczek/hbf-mcp.git
+        # REQUIRED: reviewed full commit SHA; never master, a tag or a branch.
+        hbf_mcp_revision: CHANGE_ME
+        # Existing root-provisioned files on the target. Never store secrets here.
+        hbf_mcp_env_source: /etc/hbf-mcp/candidate.env
+        hbf_mcp_policy_source: /etc/hbf-mcp/policy.json
