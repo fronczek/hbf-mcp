@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+import json, os, subprocess, sys, urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+
+HOME = Path.home()
+STATE_DIR = HOME / '.local/state/dsh-budget-guard'
+STATE_FILE = STATE_DIR / 'state.json'
+LOG_FILE = STATE_DIR / 'guard.log'
+BLOCK_FILE = STATE_DIR / 'start-block.json'
+CREDENTIALS_DIR = Path(os.environ.get('HBF_CREDENTIALS_DIR', str(HOME / '.credentials'))).expanduser()
+KEY_FILE = CREDENTIALS_DIR / 'deepseek.txt'
+DSH = HOME / 'bin/dsh-remote'
+
+TASK_WARN = 0.50
+TASK_STALL_STOP = 1.00
+TASK_HARD_STOP = 2.00
+DAILY_HARD_STOP = 5.00
+BALANCE_START_BLOCK = 3.00
+BALANCE_HARD_STOP = 1.00
+STALL_STEPS = 50
+CONTEXT_WARN = 0.75
+
+# USD / 1M tokens. We intentionally treat weekday peak windows as peak even
+# on Chinese public holidays: this can only over-estimate cost, never under-estimate it.
+RATES = {
+    'deepseek-flash': {
+        'peak': {'uncached': 0.30, 'cache': 0.006, 'output': 1.20},
+        'offpeak': {'uncached': 0.15, 'cache': 0.003, 'output': 0.60},
+    },
+    'deepseek-v4-pro': {
+        'peak': {'uncached': 1.32, 'cache': 0.044, 'output': 3.96},
+        'offpeak': {'uncached': 0.66, 'cache': 0.022, 'output': 1.98},
+    },
+}
+
+STATE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+os.chmod(STATE_DIR, 0o700)
+
+def log(msg):
+    line = f'{datetime.now().astimezone().isoformat(timespec="seconds")} {msg}'
+    with LOG_FILE.open('a', encoding='utf-8') as f: f.write(line + '\n')
+    print(line)
+
+def load_state():
+    try: return json.loads(STATE_FILE.read_text())
+    except Exception: return {'date': None, 'daily_cost': 0.0, 'sessions': {}}
+
+def save_state(st):
+    tmp = STATE_FILE.with_suffix('.tmp')
+    tmp.write_text(json.dumps(st, indent=2, sort_keys=True))
+    os.chmod(tmp, 0o600)
+    tmp.replace(STATE_FILE)
+
+def dsh_sessions():
+    env = os.environ.copy(); env['DSH_REMOTE_INSECURE'] = '1'
+    p = subprocess.run([str(DSH), 'sessions', '--json'], env=env, text=True, capture_output=True, timeout=30)
+    if p.returncode: raise RuntimeError(p.stderr.strip() or 'dsh sessions failed')
+    return json.loads(p.stdout).get('items', [])
+
+def cancel(sid, reason):
+    env = os.environ.copy(); env['DSH_REMOTE_INSECURE'] = '1'
+    p = subprocess.run([str(DSH), 'cancel', sid], env=env, text=True, capture_output=True, timeout=30)
+    if p.returncode == 0: log(f'STOP {sid}: {reason}')
+    else: log(f'ERROR cancel {sid}: {p.stderr.strip()} ({reason})')
+
+def balance():
+    key = KEY_FILE.read_text(encoding='utf-8').strip()
+    req = urllib.request.Request('https://api.deepseek.com/user/balance', headers={'Authorization': f'Bearer {key}', 'Accept':'application/json'})
+    with urllib.request.urlopen(req, timeout=15) as r: data = json.load(r)
+    usd = None
+    for b in data.get('balance_infos', []):
+        if b.get('currency') == 'USD': usd = float(b.get('total_balance', 0)); break
+    return bool(data.get('is_available')), usd
+
+def usage(item):
+    vals = ((item.get('projections') or {}).get('values') or {})
+    u = vals.get('tokenUsage') or {}
+    return {
+        'uncached': int(u.get('uncachedInputTokens') or 0),
+        'cache': int(u.get('cacheReadTokens') or 0),
+        'output': int(u.get('outputTokens') or 0),
+    }
+
+def delta(now, old):
+    return {k: max(0, now.get(k,0)-old.get(k,0)) for k in ('uncached','cache','output')}
+
+def band():
+    n = datetime.now(timezone.utc)
+    # Mon-Fri, 01-04 and 06-10 UTC. Endpoints interpreted as half-open windows.
+    peak = n.weekday() < 5 and (1 <= n.hour < 4 or 6 <= n.hour < 10)
+    return 'peak' if peak else 'offpeak'
+
+def cost(d, model):
+    rr = RATES.get(model, RATES['deepseek-v4-pro'])[band()]  # unknown => conservative
+    return sum(d[k] * rr[k] / 1_000_000 for k in d)
+
+def progress_key(vals):
+    todos = vals.get('todos')
+    if not todos: return None
+    return '|'.join(f"{x.get('status','')}:{x.get('content','')}" for x in todos)
+
+def main():
+    dry = '--dry-run' in sys.argv
+    st = load_state()
+    today = datetime.now().astimezone().date().isoformat()
+    if st.get('date') != today:
+        st = {'date': today, 'daily_cost': 0.0, 'sessions': {}}
+        log(f'NEW_DAY {today}: daily counter reset')
+
+    try:
+        available, bal = balance()
+    except Exception as e:
+        available, bal = False, None
+        log(f'ERROR balance: {e}')
+
+    try: items = dsh_sessions()
+    except Exception as e:
+        log(f'ERROR sessions: {e}'); save_state(st); return 2
+
+    running = []
+    for item in items:
+        sid = item.get('sessionId'); vals = ((item.get('projections') or {}).get('values') or {})
+        if not sid: continue
+        cur = usage(item)
+        ss = st['sessions'].setdefault(sid, {'usage': cur, 'running': False, 'run_cost': 0.0, 'steps_at_progress': 0, 'progress': None, 'warned': []})
+        model = (((vals.get('modelSelection') or {}).get('lastUsed') or {}).get('model') or ((vals.get('modelSelection') or {}).get('next') or {}).get('model') or 'deepseek-v4-pro')
+        inc = cost(delta(cur, ss.get('usage', cur)), model)
+        st['daily_cost'] += inc
+        if ss.get('running'): ss['run_cost'] = float(ss.get('run_cost',0)) + inc
+        ss['usage'] = cur
+
+        isrun = bool(item.get('running'))
+        steps = int((vals.get('sessionStats') or {}).get('steps') or 0)
+        pk = progress_key(vals)
+        if isrun and not ss.get('running'):
+            ss.update({'running': True, 'run_cost': 0.0, 'steps_at_progress': steps, 'progress': pk, 'warned': []})
+            log(f'START {sid}: model={model} steps={steps}')
+            running.append((sid, 0.0, steps, 0))
+        elif isrun:
+            if pk is not None and pk != ss.get('progress'):
+                ss['progress'] = pk; ss['steps_at_progress'] = steps
+            run_cost = float(ss.get('run_cost', 0.0))
+            since = max(0, steps - int(ss.get('steps_at_progress', steps)))
+            cp = vals.get('contextPressure') or {}
+            ctx = (float(cp.get('pressureTokens') or 0) / float(cp.get('contextWindow') or 1))
+            warned = set(ss.get('warned', []))
+            if run_cost >= TASK_WARN and 'cost50' not in warned:
+                log(f'WARN {sid}: run=${run_cost:.3f} steps={steps} no-progress-steps={since}'); warned.add('cost50')
+            if ctx >= CONTEXT_WARN and 'context' not in warned:
+                log(f'WARN {sid}: context={ctx:.1%}'); warned.add('context')
+            ss['warned'] = sorted(warned)
+            reason = None
+            if run_cost >= TASK_HARD_STOP: reason = f'run cost ${run_cost:.3f} >= ${TASK_HARD_STOP:.2f}'
+            elif run_cost >= TASK_STALL_STOP and since >= STALL_STEPS: reason = f'run cost ${run_cost:.3f} and {since} steps without TODO progress'
+            if reason and not dry: cancel(sid, reason); ss['running'] = False
+            elif reason: log(f'DRY_STOP {sid}: {reason}')
+            running.append((sid, run_cost, steps, since))
+        else:
+            if ss.get('running'): log(f'END {sid}: run=${float(ss.get("run_cost",0)):.3f}')
+            ss['running'] = False
+
+    hard_reason = None
+    if st['daily_cost'] >= DAILY_HARD_STOP: hard_reason = f'daily estimated cost ${st["daily_cost"]:.3f} >= ${DAILY_HARD_STOP:.2f}'
+    elif bal is not None and bal < BALANCE_HARD_STOP: hard_reason = f'balance ${bal:.2f} < ${BALANCE_HARD_STOP:.2f}'
+    elif not available and bal is not None: hard_reason = 'DeepSeek account unavailable'
+    if hard_reason:
+        for sid, *_ in running:
+            if not dry: cancel(sid, hard_reason)
+            else: log(f'DRY_STOP {sid}: {hard_reason}')
+
+    block_reason = None
+    if st['daily_cost'] >= DAILY_HARD_STOP: block_reason = hard_reason or 'daily limit reached'
+    elif bal is not None and bal < BALANCE_START_BLOCK: block_reason = f'balance ${bal:.2f} < start reserve ${BALANCE_START_BLOCK:.2f}'
+    elif not available: block_reason = 'DeepSeek account unavailable/balance check failed'
+    if block_reason:
+        BLOCK_FILE.write_text(json.dumps({'reason': block_reason, 'at': datetime.now().astimezone().isoformat()}, indent=2)); os.chmod(BLOCK_FILE,0o600)
+    else:
+        try: BLOCK_FILE.unlink()
+        except FileNotFoundError: pass
+
+    st['last_balance'] = bal; st['last_available'] = available; st['last_check'] = datetime.now().astimezone().isoformat()
+    save_state(st)
+    print(f'STATUS daily=${st["daily_cost"]:.4f} balance={"?" if bal is None else f"${bal:.2f}"} running={len(running)} band={band()} block={block_reason or "no"}')
+    for sid, rc, steps, since in running: print(f'  {sid} run=${rc:.4f} steps={steps} no-progress-steps={since}')
+    return 0
+
+if __name__ == '__main__': raise SystemExit(main())
