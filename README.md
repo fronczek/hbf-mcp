@@ -5,7 +5,7 @@
 > [policy example](auth/policy.example.json) and [Ansible deployment](docs/deployment.md).
 > Multiuser access requires the protected policy-mode deployment; the old runtime is transitional.
 
-Personal MCP bridge for ChatGPT running on a disposable VM.
+Shared HBF MCP server and compatible administrative CLI. HTTP supports authenticated user/client bindings; local stdio uses trusted Unix-account bindings.
 
 The goal is deliberately simple:
 

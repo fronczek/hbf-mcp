@@ -679,10 +679,11 @@ def test_bounded_tools_have_closed_world_annotations():
     assert tools["deepseek_flash_task"].annotations.open_world_hint is True
 
 
-@pytest.mark.parametrize("changed_file", ["server.py", "zabbix_tools.py"])
+@pytest.mark.parametrize("changed_file", ["server.py", "zabbix_tools.py", "auth/policy.py", "auth/audit.py", "tools/api.py", "src/hbf_api_tools/gitea.py"])
 def test_source_fingerprint_detects_changed_runtime(tmp_path, changed_file):
     import diagnostics_tools as diagnostics
     for name in diagnostics.SOURCE_FILES:
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / name).write_text("# synthetic source\n")
     before = diagnostics.source_fingerprint(tmp_path)
     (tmp_path / changed_file).write_text("# changed source\n")

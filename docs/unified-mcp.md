@@ -159,5 +159,11 @@ Read-only inspection found:
   files. This is a bounded local search, not proof that no Jenkins consumer exists.
 
 No old repository, existing branch, unrelated worktree, credential or unknown
-consumer was deleted. Source consolidation is implemented; full consumer and
-production migration remains explicitly open.
+consumer was deleted. Live health checks also report absent Gitea/YouTrack credentials in the bridge
+runtime and failed upstream identity/connectivity checks. The service itself is
+active and its current source fingerprint matches disk. Do not copy another
+agent's credentials to make these checks pass; provision the selected service
+identity on the chosen host through the existing secret-management mechanism.
+
+Source consolidation is implemented; full consumer and production migration
+remains explicitly open.

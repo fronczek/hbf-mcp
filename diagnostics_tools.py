@@ -15,7 +15,12 @@ SERVICE_NAME=os.getenv('HBF_MCP_SERVICE_NAME', 'hbf-mcp')
 
 SOURCE_ROOT = Path(__file__).resolve().parent
 SOURCE_FILES = ('server.py', 'gitea_tools.py', 'youtrack_tools.py',
-                'git_workflow_tools.py', 'agent_tools.py', 'diagnostics_tools.py', 'zabbix_tools.py', 'emby_tools.py')
+                'git_workflow_tools.py', 'agent_tools.py', 'diagnostics_tools.py', 'zabbix_tools.py', 'emby_tools.py',
+                'auth0_resource.py', 'pyproject.toml', 'requirements.txt') + tuple(
+                    str(path.relative_to(SOURCE_ROOT))
+                    for directory in ('auth', 'services', 'tools', 'src/hbf_api_tools')
+                    for path in sorted((SOURCE_ROOT / directory).rglob('*.py'))
+                ) + ('src/hbf_api_tools/monitoring.yml',)
 
 
 def source_fingerprint(root: Path) -> str:
