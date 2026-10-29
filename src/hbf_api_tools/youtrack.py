@@ -12,7 +12,10 @@ ISSUE_ID = re.compile(r"^[A-Z][A-Z0-9]+-[1-9][0-9]{0,7}$")
 
 
 class YouTrack:
-    def __init__(self):
+    def __init__(self, *, identity_provider=None, attribution_provider=None):
+        # Internal dependency injection for MCP service identities; CLI defaults stay host-bound.
+        self._identity_provider = identity_provider or acting_agent
+        self._attribution_provider = attribution_provider or add_attribution
         cfg = load_scalar_yaml("youtrack.yml")
         self.base = cfg.get("youtrack_url", "").rstrip("/")
         self.token = cfg.get("youtrack_token_value", "")
@@ -54,7 +57,7 @@ class YouTrack:
                             query={"$top": limit, "fields": "id,text,created,author(login,name)"})
 
     def _confirm_agent(self) -> str:
-        actor = acting_agent()
+        actor = self._identity_provider()
         user = request_json(self.base, "/api/users/me", self.token,
                             query={"fields": "login"})
         if user.get("login") != actor:
@@ -96,7 +99,7 @@ class YouTrack:
         if not 1 <= len(text) <= 10_000:
             raise ValueError("Comment must contain 1..10000 characters")
         actor = self._confirm_agent()
-        text = add_attribution(text, actor)
+        text = self._attribution_provider(text, actor)
         if len(text) > 10_000:
             raise ValueError("Comment with agent attribution exceeds the limit")
         result = request_json(self.base, self._issue(issue_id) + "/comments", self.token,

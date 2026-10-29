@@ -15,7 +15,10 @@ DEFAULT_REPOS = ("secnet/ese-agent", "secnet/ese-backend", "secnet/ese-frontend"
 
 
 class Gitea:
-    def __init__(self):
+    def __init__(self, *, identity_provider=None, attribution_provider=None):
+        # Internal dependency injection for MCP service identities; CLI defaults stay host-bound.
+        self._identity_provider = identity_provider or acting_agent
+        self._attribution_provider = attribution_provider or add_attribution
         cfg = load_scalar_yaml("gitea.yml")
         self.base = cfg.get("gitea_url", "").rstrip("/")
         self.token = cfg.get("token_value", "")
@@ -47,7 +50,7 @@ class Gitea:
                               method=method, query=query, payload=payload,
                               auth_scheme="token")
         if route == "/user":
-            if result.get("login") != acting_agent():
+            if result.get("login") != self._identity_provider():
                 raise ConfigurationError("Gitea token does not match local agent identity")
             self._identity_verified = True
         return result
@@ -60,7 +63,7 @@ class Gitea:
         return value
 
     def _confirm_agent(self) -> str:
-        actor = acting_agent()
+        actor = self._identity_provider()
         user = self._call("/user")
         if user.get("login") != actor:
             raise ConfigurationError("Refusing Gitea mutation: token does not match local agent identity")
@@ -111,7 +114,7 @@ class Gitea:
         if not 1 <= len(title) <= 200 or len(body) > 20_000:
             raise ValueError("PR title must be 1..200 characters and body at most 20000")
         actor = self._confirm_agent()
-        body = add_attribution(body, actor)
+        body = self._attribution_provider(body, actor)
         if len(body) > 20_000:
             raise ValueError("PR body with agent attribution exceeds the limit")
         # Inspect all pages up to a fixed ceiling before writing. On a timeout or
@@ -224,7 +227,7 @@ class Gitea:
                  "rather than marked merged by Gitea. No additional code merge is needed.")
         if actor == "dsh":
             audit += f"\n\nadded by {dsh_tier}"
-        audit = add_attribution(audit, actor)
+        audit = self._attribution_provider(audit, actor)
         self._call(self._repo(repo) + f"/issues/{number}/comments", method="POST",
                    payload={"body": audit})
         # If either request is ambiguous, inspect remotely before considering a retry.
