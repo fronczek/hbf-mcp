@@ -18,11 +18,14 @@ def installer(tmp_path):
     for name in ("server.py", "test_client.py", "auth0_resource.py", "gitea_tools.py", "youtrack_tools.py",
                  "git_workflow_tools.py", "agent_tools.py", "diagnostics_tools.py",
                  "zabbix_tools.py", "emby_tools.py", "bin/zabbix-watch", "bin/kuk-boiler-watch",
-                 "requirements.txt", "hbf-mcp.env.example", "systemd/hbf-mcp.service",
+                 "requirements.txt", "pyproject.toml", "hbf-mcp.env.example", "systemd/hbf-mcp.service",
                  "completion/hbf-mcp"):
         dest = source / name
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / name, dest)
+    for name in ("auth", "services", "tools", "src"):
+        shutil.copytree(ROOT / name, source / name,
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.egg-info"))
     (tmp_path / "etc/systemd/system").mkdir(parents=True)
     (tmp_path / "locks").mkdir()
     script = (ROOT / "install").read_text()
@@ -70,7 +73,7 @@ if sys.argv[1:3] == ["-m", "venv"]:
     directory.mkdir(parents=True)
     (directory / "python").write_text({runtime_python!r})
     (directory / "python").chmod(0o755)
-    (directory / "pip").write_text("#!/bin/sh\\nexit 0\\n")
+    (directory / "pip").write_text('#!/bin/sh\\nprintf "%s\\\\n" "$*" >> "$PIP_CALLS"\\nexit 0\\n')
     (directory / "pip").chmod(0o755)
 else:
     os.execv({sys.executable!r}, [{sys.executable!r}, *sys.argv[1:]])
@@ -84,6 +87,7 @@ else:
     env["PATH"] = str(commands) + os.pathsep + env["PATH"]
     env["SERVICE_CALLS"] = str(tmp_path / "service-calls")
     env["HOMES"] = str(tmp_path / "homes")
+    env["PIP_CALLS"] = str(tmp_path / "pip-calls")
 
     def run(*args, ok=True):
         result = subprocess.run(["bash", str(source / "install"), *args],
@@ -304,3 +308,32 @@ def test_migration_package_failure_leaves_old_service_running(tmp_path, installe
     calls = (tmp_path / "service-calls").read_text()
     assert "stop hbf-mcp\n" not in calls
     assert not (tmp_path / "opt/hbf-mcp-artur").exists()
+
+
+def test_installer_copies_unified_runtime_and_installs_compatible_cli(tmp_path, installer):
+    source, run = installer
+    # Checkout-only and sensitive files must never enter the runtime copy.
+    (source / "auth/.env").write_text("SYNTHETIC_SECRET=do-not-copy")
+    (source / "src/hbf_api_tools/token.yml").write_text("synthetic: do-not-copy")
+    (source / "src/hbf_api_tools/.git").mkdir()
+    (source / "src/hbf_api_tools/.git/config").write_text("checkout metadata")
+    run("artur", "afronczek")
+    runtime = tmp_path / "opt/hbf-mcp-artur"
+    for name in ("auth/server.py", "auth/policy.py", "services/identity.py",
+                 "tools/api.py", "src/hbf_api_tools/cli.py",
+                 "src/hbf_api_tools/monitoring.yml", "pyproject.toml"):
+        assert (runtime / name).read_bytes() == (source / name).read_bytes()
+    assert not (runtime / "auth/.env").exists()
+    assert not (runtime / "src/hbf_api_tools/token.yml").exists()
+    assert not (runtime / "src/hbf_api_tools/.git").exists()
+    pip_calls = (tmp_path / "pip-calls").read_text().splitlines()
+    assert "install " + str(runtime) in pip_calls
+    assert "install -r " + str(source / "requirements.txt") in pip_calls
+
+
+def test_installer_checks_nested_runtime_syntax_before_restart(tmp_path, installer):
+    source, run = installer
+    (source / "auth/policy.py").write_text("def broken(:\n")
+    run("artur", "afronczek", ok=False)
+    calls = (tmp_path / "service-calls").read_text() if (tmp_path / "service-calls").exists() else ""
+    assert "restart hbf-mcp-artur" not in calls

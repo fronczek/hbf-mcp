@@ -26,7 +26,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from mcp.server import MCPServer
+from auth.server import AuthorizedMCPServer
+from auth.policy import load_policy
 from mcp.server.auth.settings import AuthSettings
 from pydantic import AnyHttpUrl
 from auth0_resource import Auth0Verifier
@@ -326,7 +327,7 @@ def _run_readonly(args: list[str], *, timeout: int | None = None) -> subprocess.
 # Server
 # ---------------------------------------------------------------------------
 
-def oauth_settings() -> dict:
+def oauth_settings(policy=None) -> dict:
     """Enable strict JWT verification only with complete Auth0 configuration."""
     enabled = os.getenv("HBF_MCP_OAUTH_ENABLED", "false").strip().lower()
     if enabled in ("false", "0", "no"):
@@ -335,21 +336,37 @@ def oauth_settings() -> dict:
         raise RuntimeError("HBF_MCP_OAUTH_ENABLED must be an explicit boolean")
     issuer = os.environ["HBF_MCP_AUTH0_ISSUER"].rstrip("/") + "/"
     audience = os.environ["HBF_MCP_PUBLIC_URL"]
-    verifier = Auth0Verifier(issuer, audience,
-                            os.environ["HBF_MCP_AUTH0_CLIENT_ID"],
-                            os.environ["HBF_MCP_AUTH0_OWNER_SUB"])
+    verifier = (Auth0Verifier(issuer, audience, allowed_bindings=policy.bindings)
+                if policy is not None else Auth0Verifier(issuer, audience,
+                    os.environ["HBF_MCP_AUTH0_CLIENT_ID"],
+                    os.environ["HBF_MCP_AUTH0_OWNER_SUB"]))
     return {
         "token_verifier": verifier,
         "auth": AuthSettings(issuer_url=AnyHttpUrl(issuer),
                              resource_server_url=AnyHttpUrl(audience),
-                             required_scopes=["mcp:admin"],
+                             required_scopes=["mcp:access" if policy is not None else "mcp:admin"],
                              validate_token_resource=True),
     }
 
 
-mcp = MCPServer(
+TRANSPORT = os.getenv("HBF_MCP_TRANSPORT", "streamable-http")
+if TRANSPORT not in ("stdio", "streamable-http"):
+    raise RuntimeError("HBF_MCP_TRANSPORT must be stdio or streamable-http")
+POLICY = load_policy(os.environ["HBF_MCP_POLICY_FILE"]) if os.getenv("HBF_MCP_POLICY_FILE") else None
+if POLICY is not None and TRANSPORT == "streamable-http" and os.getenv("HBF_MCP_OAUTH_ENABLED", "false").lower() not in ("true", "1", "yes"):
+    raise RuntimeError("Multiuser HTTP requires OAuth")
+STDIO_IDENTITY = None
+if POLICY is not None and TRANSPORT == "stdio":
+    import pwd
+    STDIO_IDENTITY = POLICY.stdio_bindings.get(pwd.getpwuid(os.geteuid()).pw_name)
+    if STDIO_IDENTITY is None:
+        raise RuntimeError("Unix user has no trusted stdio binding")
+
+mcp = AuthorizedMCPServer(
     NAME,
-    **oauth_settings(),
+    policy=POLICY,
+    stdio_identity=STDIO_IDENTITY,
+    **(oauth_settings(POLICY) if TRANSPORT == "streamable-http" else {}),
     instructions=(
         "This is Artur's single-purpose administrative bridge VM. The MCP "
         "service account is unprivileged: it has no sudo and this server "
@@ -819,7 +836,12 @@ register_zabbix_tools(mcp)
 from emby_tools import register_tools as register_emby_tools
 register_emby_tools(mcp)
 
-if __name__ == "__main__":
+from tools.api import register_tools as register_api_tools
+register_api_tools(mcp)
+
+if __name__ == "__main__" and TRANSPORT == "stdio":
+    mcp.run(transport="stdio")
+elif __name__ == "__main__":
     mcp.run(
         transport="streamable-http",
         host=HOST,

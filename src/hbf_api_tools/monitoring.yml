@@ -1,0 +1,100 @@
+# Safe, declarative monitoring profiles. Credentials are read separately from
+# .credentials/zabbix.yml and .credentials/influxdb_<bucket>.yml.
+zabbix:
+  pve_temperatures:
+    description: CPU and NVMe temperatures for the HBF PVE hosts
+    max_sample_age_minutes: 15
+    hosts:
+      - hbfplhpved*
+    metrics:
+      cpu_c:
+        item_keys:
+          - hw.sensor.temp[coretemp-isa-0000,Package id 0]
+        thresholds: [70, 80, 90]
+      nvme_c:
+        item_keys:
+          - hw.sensor.temp[nvme-pci-0100,Composite]
+        thresholds: [65, 75, 80]
+    alerts:
+      minimum_severity: 4
+      availability_terms:
+        - not available
+        - unavailable
+        - nodata
+        - link down
+        - unreachable
+        - offline
+        - no data
+        - failed
+
+influx:
+  kuk_boiler:
+    description: Home Assistant boiler and office power consistency checks
+    credentials: hass_kancelaria
+    window_hours: 24
+    evaluation_hours: 1
+    max_latest_age_minutes: 10
+    evaluation_anchor: office_main
+    max_staleness_minutes: 5
+    signals:
+      heating_power:
+        field: value
+        tags:
+          entity_id: electric_water_heater_heating_power
+      boiler_temperature:
+        field: value
+        tags:
+          entity_id: electric_water_heater_temperature
+      office_main:
+        field: value
+        range_hours: 1
+        tags:
+          entity_id: 325_pl1_main
+        aggregate_window: 1m
+      server_power:
+        field: value
+        range_hours: 1
+        tags:
+          entity_id: 325_pl1_srv
+        aggregate_window: 1m
+    derived_signals:
+      office_l1_power:
+        operation: subtract
+        left: office_main
+        right: server_power
+    rules:
+      - id: heater_no_temperature_rise
+        type: sustained_delta
+        when_signal: heating_power
+        when_between: [1900, 2100]
+        duration_minutes: 20
+        minimum_samples: 20
+        measure_signal: boiler_temperature
+        measure: delta
+        operator: lt
+        value: 3
+      - id: temperature_drop_while_heating
+        type: paired_window_delta
+        when_signal: heating_power
+        when_between: [1900, 2100]
+        measure_signal: boiler_temperature
+        measure: decrease
+        window_minutes: 15
+        operator: gte
+        value: 10
+      - id: missing_expected_heater_load
+        type: sustained_range_mismatch
+        when_signal: heating_power
+        when_between: [1900, 2100]
+        measure_signal: office_l1_power
+        expected_between: [1700, 2800]
+        duration_minutes: 3
+        minimum_samples: 3
+      - id: office_load_without_heating
+        type: sustained_pair
+        first_signal: heating_power
+        first_equals: 0
+        second_signal: office_l1_power
+        second_between: [1700, 2800]
+        duration_minutes: 15
+        minimum_samples: 15

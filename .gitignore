@@ -8,3 +8,7 @@ __pycache__/
 .idea/
 .vscode/
 .DS_Store
+
+dist/
+build/
+*.egg-info/

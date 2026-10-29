@@ -1,0 +1,292 @@
+---
+- name: Deploy an isolated, pinned MCP release with automatic rollback
+  hosts: hbf_mcp
+  become: true
+  serial: 1
+  vars:
+    hbf_mcp_service: hbf-mcp-candidate
+    hbf_mcp_root: /opt/hbf-mcp-candidate
+    hbf_mcp_user: gptagent
+    hbf_mcp_group: gptagent
+    hbf_mcp_home: /home/gptagent
+    hbf_mcp_host: 127.0.0.1
+    hbf_mcp_port: 18765
+    hbf_mcp_repo: https://github.com/fronczek/hbf-mcp.git
+    hbf_mcp_env_source: /etc/hbf-mcp/candidate.env
+    hbf_mcp_policy_source: /etc/hbf-mcp/policy.json
+    hbf_mcp_audit_dir: "/var/log/{{ hbf_mcp_service }}"
+  tasks:
+    - name: Validate immutable deployment coordinates
+      ansible.builtin.assert:
+        that:
+          - hbf_mcp_revision is defined
+          - hbf_mcp_revision is match('^[a-f0-9]{40}$')
+          - hbf_mcp_service is match('^hbf-mcp-[a-z0-9-]+$')
+          - hbf_mcp_root is match('^/opt/hbf-mcp-[a-z0-9-]+$')
+          - hbf_mcp_audit_dir is match('^/var/log/hbf-mcp-[a-z0-9-]+$')
+          - hbf_mcp_user != 'root'
+          - hbf_mcp_port | int >= 1024
+          - hbf_mcp_port | int <= 65535
+    - name: Inspect private environment source
+      ansible.builtin.stat:
+        path: "{{ hbf_mcp_env_source }}"
+        checksum_algorithm: sha256
+      register: mcp_env
+      no_log: true
+    - name: Inspect centrally administered policy source
+      ansible.builtin.stat:
+        path: "{{ hbf_mcp_policy_source }}"
+        checksum_algorithm: sha256
+      register: mcp_policy
+      no_log: true
+    - name: Require root-owned non-writable deployment inputs
+      ansible.builtin.assert:
+        that:
+          - mcp_env.stat.isreg | default(false)
+          - mcp_env.stat.uid == 0
+          - mcp_env.stat.mode == '0600'
+          - mcp_policy.stat.isreg | default(false)
+          - mcp_policy.stat.uid == 0
+          - mcp_policy.stat.mode in ['0600', '0640', '0644']
+      no_log: true
+    - name: Check OAuth and reject environment overrides of security coordinates
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import pathlib, sys
+            entries = {}
+            for line in pathlib.Path(sys.argv[1]).read_text().splitlines():
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                if '=' not in line:
+                    raise SystemExit('Expected plain KEY=value environment entries')
+                key, value = line.split('=', 1)
+                entries[key] = value.strip().strip('"').strip("'")
+            forced = {'HBF_MCP_TRANSPORT', 'HBF_MCP_POLICY_FILE', 'HBF_MCP_AUDIT_FILE',
+                      'HBF_MCP_HOST', 'HBF_MCP_PORT', 'HBF_MCP_AGENT_HOME'}
+            if forced.intersection(entries):
+                raise SystemExit('Environment must not override deployment coordinates')
+            if entries.get('HBF_MCP_OAUTH_ENABLED', '').lower() not in {'true', '1', 'yes'}:
+                raise SystemExit('Authenticated HTTP requires OAuth enabled')
+          - "{{ hbf_mcp_env_source }}"
+      changed_when: false
+      no_log: true
+    - name: Resolve immutable release including configuration versions
+      ansible.builtin.set_fact:
+        mcp_release: "{{ hbf_mcp_root }}/releases/{{ hbf_mcp_revision }}-{{ mcp_env.stat.checksum[:12] }}-{{ mcp_policy.stat.checksum[:12] }}"
+      no_log: true
+    - name: Ensure host prerequisites
+      ansible.builtin.package:
+        name: [git, python3, python3-venv]
+        state: present
+    - name: Require existing unprivileged service account
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ hbf_mcp_user }}"
+    - name: Create root-managed release parent
+      ansible.builtin.file:
+        path: "{{ hbf_mcp_root }}/releases"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+    - name: Create private writable audit directory
+      ansible.builtin.file:
+        path: "{{ hbf_mcp_audit_dir }}"
+        state: directory
+        owner: "{{ hbf_mcp_user }}"
+        group: "{{ hbf_mcp_group }}"
+        mode: '0700'
+    - name: Inspect previous current symlink
+      ansible.builtin.stat:
+        path: "{{ hbf_mcp_root }}/current"
+        follow: false
+      register: mcp_current
+    - name: Refuse to overwrite a non-symlink installation
+      ansible.builtin.assert:
+        that:
+          - not (mcp_current.stat.exists | default(false)) or (mcp_current.stat.islnk | default(false))
+    - name: Inspect previous service definition
+      ansible.builtin.stat:
+        path: "/etc/systemd/system/{{ hbf_mcp_service }}.service"
+      register: mcp_unit
+    - name: Save previous service definition for rollback
+      ansible.builtin.slurp:
+        src: "/etc/systemd/system/{{ hbf_mcp_service }}.service"
+      register: mcp_old_unit
+      when: mcp_unit.stat.exists
+    - name: Check out exact reviewed source
+      ansible.builtin.git:
+        repo: "{{ hbf_mcp_repo }}"
+        dest: "{{ mcp_release }}"
+        version: "{{ hbf_mcp_revision }}"
+        force: false
+    - name: Install server and compatible CLI into release virtual environment
+      ansible.builtin.pip:
+        requirements: "{{ mcp_release }}/requirements.txt"
+        virtualenv: "{{ mcp_release }}/.venv"
+        virtualenv_command: python3 -m venv
+    - name: Install compatible CLI package into release virtual environment
+      ansible.builtin.pip:
+        name: "{{ mcp_release }}"
+        virtualenv: "{{ mcp_release }}/.venv"
+    - name: Install private release environment
+      ansible.builtin.copy:
+        src: "{{ hbf_mcp_env_source }}"
+        dest: "{{ mcp_release }}/runtime.env"
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+    - name: Install policy readable but never writable by the service
+      ansible.builtin.copy:
+        src: "{{ hbf_mcp_policy_source }}"
+        dest: "{{ mcp_release }}/policy.json"
+        remote_src: true
+        owner: root
+        group: "{{ hbf_mcp_group }}"
+        mode: '0640'
+      no_log: true
+    - name: Compile candidate before switching
+      ansible.builtin.command:
+        argv: ["{{ mcp_release }}/.venv/bin/python", -m, compileall, -q, "{{ mcp_release }}/server.py", "{{ mcp_release }}/auth0_resource.py", "{{ mcp_release }}/src", "{{ mcp_release }}/auth", "{{ mcp_release }}/services", "{{ mcp_release }}/tools"]
+      changed_when: false
+    - name: Validate authenticated candidate configuration without starting a listener
+      ansible.builtin.command:
+        argv:
+          - "{{ mcp_release }}/.venv/bin/python"
+          - -c
+          - |
+            import os, pathlib, pwd, subprocess, sys
+            release, audit, host, port, home, username = sys.argv[1:]
+            account = pwd.getpwnam(username)
+            env = dict(os.environ)
+            for line in pathlib.Path(release, 'runtime.env').read_text().splitlines():
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    key, value = line.split('=', 1)
+                    env[key] = value.strip().strip('"').strip("'")
+            env.update(HBF_MCP_TRANSPORT='streamable-http',
+                       HBF_MCP_POLICY_FILE=str(pathlib.Path(release, 'policy.json')),
+                       HBF_MCP_AUDIT_FILE=str(pathlib.Path(audit, 'operations.jsonl')),
+                       HBF_MCP_HOST=host, HBF_MCP_PORT=port,
+                       HBF_MCP_AGENT_HOME=home, HOME=home, USER=username,
+                       LOGNAME=username)
+            subprocess.run([sys.executable, '-c', 'import server; assert server.mcp'],
+                           cwd=release, env=env, check=True,
+                           user=account.pw_uid, group=account.pw_gid,
+                           extra_groups=os.getgrouplist(username, account.pw_gid))
+          - "{{ mcp_release }}"
+          - "{{ hbf_mcp_audit_dir }}"
+          - "{{ hbf_mcp_host }}"
+          - "{{ hbf_mcp_port | string }}"
+          - "{{ hbf_mcp_home }}"
+          - "{{ hbf_mcp_user }}"
+      changed_when: false
+      no_log: true
+    - name: Activate and check candidate, restoring previous release on failure
+      block:
+        - name: Install systemd service definition
+          ansible.builtin.template:
+            src: hbf-mcp.service.j2
+            dest: "/etc/systemd/system/{{ hbf_mcp_service }}.service"
+            owner: root
+            group: root
+            mode: '0644'
+          register: mcp_new_unit
+        - name: Atomically switch current release
+          ansible.builtin.command:
+            argv:
+              - python3
+              - -c
+              - |
+                import os, pathlib, sys, uuid
+                target, current = sys.argv[1:]
+                if pathlib.Path(current).is_symlink() and os.readlink(current) == target:
+                    print('unchanged')
+                else:
+                    temporary = current + '.' + uuid.uuid4().hex
+                    try:
+                        os.symlink(target, temporary)
+                        os.replace(temporary, current)
+                    finally:
+                        if os.path.lexists(temporary):
+                            os.unlink(temporary)
+                    print('changed')
+              - "{{ mcp_release }}"
+              - "{{ hbf_mcp_root }}/current"
+          register: mcp_switch
+          changed_when: "'changed' == mcp_switch.stdout"
+        - name: Start or restart pinned release
+          ansible.builtin.systemd_service:
+            name: "{{ hbf_mcp_service }}"
+            daemon_reload: true
+            enabled: true
+            state: "{{ 'restarted' if mcp_switch.changed or mcp_new_unit.changed else 'started' }}"
+        - name: Verify authenticated HTTP rejects an unauthenticated MCP request
+          ansible.builtin.uri:
+            url: "http://{{ hbf_mcp_host }}:{{ hbf_mcp_port }}/mcp"
+            method: GET
+            status_code: 401
+            return_content: false
+          register: mcp_health
+          until: mcp_health.status | default(0) == 401
+          retries: 10
+          delay: 2
+        - name: Verify service remains active
+          ansible.builtin.command:
+            argv: [systemctl, is-active, "{{ hbf_mcp_service }}"]
+          changed_when: false
+      rescue:
+        - name: Restore previous service definition
+          ansible.builtin.copy:
+            content: "{{ mcp_old_unit.content | b64decode }}"
+            dest: "/etc/systemd/system/{{ hbf_mcp_service }}.service"
+            owner: root
+            group: root
+            mode: '0644'
+          when: mcp_unit.stat.exists
+        - name: Atomically restore previous current release
+          ansible.builtin.command:
+            argv:
+              - python3
+              - -c
+              - |
+                import os, sys, uuid
+                target, current = sys.argv[1:]
+                temporary = current + '.' + uuid.uuid4().hex
+                try:
+                    os.symlink(target, temporary)
+                    os.replace(temporary, current)
+                finally:
+                    if os.path.lexists(temporary):
+                        os.unlink(temporary)
+              - "{{ mcp_current.stat.lnk_source }}"
+              - "{{ hbf_mcp_root }}/current"
+          when: mcp_current.stat.islnk | default(false)
+          changed_when: true
+        - name: Restart previous installation
+          ansible.builtin.systemd_service:
+            name: "{{ hbf_mcp_service }}"
+            daemon_reload: true
+            state: restarted
+          when: mcp_current.stat.islnk | default(false)
+        - name: Stop failed first installation
+          ansible.builtin.systemd_service:
+            name: "{{ hbf_mcp_service }}"
+            daemon_reload: true
+            enabled: false
+            state: stopped
+          when: not (mcp_current.stat.islnk | default(false))
+        - name: Remove failed first-install current pointer
+          ansible.builtin.file:
+            path: "{{ hbf_mcp_root }}/current"
+            state: absent
+          when: not (mcp_current.stat.islnk | default(false))
+        - name: Report failed deployment after rollback
+          ansible.builtin.fail:
+            msg: "Candidate activation or health check failed. Previous release restored where available; failed first installation stopped. Inspect systemd logs."

@@ -69,6 +69,17 @@ READ_ONLY_TOOLS |= GIT_READ_ONLY_TOOLS | AGENT_READ_ONLY_TOOLS | {"mcp_health","
 MUTATING_TOOLS |= GIT_MUTATING_TOOLS | AGENT_MUTATING_TOOLS | {"youtrack_apply_state"}
 
 
+# Typed adapters use the same service implementation as the compatible CLI.
+READ_ONLY_TOOLS |= {
+    "api_gitea_branches", "api_gitea_pulls", "api_gitea_pull", "api_gitea_status",
+    "api_gitea_diff", "api_gitea_files", "api_youtrack_issue", "api_youtrack_comments",
+    "api_monitor_list", "api_monitor_zabbix", "api_monitor_influx", "api_dsh_status",
+}
+MUTATING_TOOLS |= {
+    "api_gitea_create_pr", "api_gitea_merge_pr", "api_youtrack_add_comment", "api_youtrack_set_state",
+}
+
+
 def list_tools() -> dict[str, object]:
     return {tool.name: tool for tool in asyncio.run(server.mcp.list_tools())}
 
@@ -668,10 +679,11 @@ def test_bounded_tools_have_closed_world_annotations():
     assert tools["deepseek_flash_task"].annotations.open_world_hint is True
 
 
-@pytest.mark.parametrize("changed_file", ["server.py", "zabbix_tools.py"])
+@pytest.mark.parametrize("changed_file", ["server.py", "zabbix_tools.py", "auth/policy.py", "auth/audit.py", "tools/api.py", "src/hbf_api_tools/gitea.py"])
 def test_source_fingerprint_detects_changed_runtime(tmp_path, changed_file):
     import diagnostics_tools as diagnostics
     for name in diagnostics.SOURCE_FILES:
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / name).write_text("# synthetic source\n")
     before = diagnostics.source_fingerprint(tmp_path)
     (tmp_path / changed_file).write_text("# changed source\n")
